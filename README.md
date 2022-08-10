@@ -29,5 +29,5 @@ here pressing capital E in normal mode will encrypt the file.
 		
 
 ### Demo
-[](img/demo.gif)
+![](img/demo.gif)
 
