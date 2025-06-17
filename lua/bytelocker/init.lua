@@ -881,7 +881,7 @@ function M.toggle_encryption()
             selection.start_line, selection.end_line, selection.start_col, selection.end_col), vim.log.levels.INFO)
         vim.notify("Selected text length: " .. #selection.text, vim.log.levels.INFO)
         
-        -- Handle selected text encryption/decryption (use text-only for selections)
+        -- Handle selected text encryption/decryption (use file-safe format for selections too)
         local password = get_password()
         if not password then
             vim.notify("Password cannot be empty", vim.log.levels.ERROR)
@@ -891,9 +891,9 @@ function M.toggle_encryption()
         local new_text
         local operation
         
-        if is_text_encrypted(selection.text) then
+        if is_file_encrypted(selection.text) then
             -- Attempt decryption with error handling
-            local success, result = pcall(decrypt_text_only, selection.text, password)
+            local success, result = pcall(decrypt_from_file, selection.text, password)
             if not success then
                 vim.notify("Decryption failed: " .. result, vim.log.levels.ERROR)
                 return
@@ -901,7 +901,7 @@ function M.toggle_encryption()
             new_text = result
             operation = "decrypted"
         else
-            new_text = encrypt_text_only(selection.text, password)
+            new_text = encrypt_for_file(selection.text, password)
             operation = "encrypted"
         end
         
@@ -963,8 +963,8 @@ function M.encrypt()
     local selection = get_visual_selection()
     
     if selection then
-        -- Handle selected text encryption (use text-only for selections)
-        if is_text_encrypted(selection.text) then
+        -- Handle selected text encryption (use file-safe format for selections too)
+        if is_file_encrypted(selection.text) then
             vim.notify("Selected text is already encrypted", vim.log.levels.WARN)
             return
         end
@@ -975,7 +975,7 @@ function M.encrypt()
             return
         end
         
-        local encrypted_text = encrypt_text_only(selection.text, password)
+        local encrypted_text = encrypt_for_file(selection.text, password)
         replace_visual_selection(selection, encrypted_text)
         vim.notify("Selected text encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
         
@@ -1023,8 +1023,8 @@ function M.decrypt()
     local selection = get_visual_selection()
     
     if selection then
-        -- Handle selected text decryption (use text-only for selections)
-        if not is_text_encrypted(selection.text) then
+        -- Handle selected text decryption (use file-safe format for selections too)
+        if not is_file_encrypted(selection.text) then
             vim.notify("Selected text is not encrypted", vim.log.levels.WARN)
             return
         end
@@ -1035,7 +1035,7 @@ function M.decrypt()
             return
         end
         
-        local success, decrypted_text = pcall(decrypt_text_only, selection.text, password)
+        local success, decrypted_text = pcall(decrypt_from_file, selection.text, password)
         if not success then
             vim.notify("Decryption failed: " .. decrypted_text, vim.log.levels.ERROR)
             return
@@ -1094,21 +1094,22 @@ end
 function M.setup(opts)
     opts = opts or {}
     
-    -- First try to load saved cipher choice from disk
+    -- Merge user config with defaults first
+    config = vim.tbl_deep_extend("force", config, opts)
+    
+    -- Then check if user provided a cipher in config
+    local user_provided_cipher = opts.cipher
+    
+    -- Try to load saved cipher choice from disk (saved choice takes precedence)
     local saved_cipher = load_cipher()
     if saved_cipher then
         config.cipher = saved_cipher
         config._cipher_selected = true
-    end
-    
-    -- Merge user config with defaults (user-provided cipher overrides saved one)
-    config = vim.tbl_deep_extend("force", config, opts)
-    
-    -- Mark cipher as selected if user provided one
-    if opts.cipher then
+    elseif user_provided_cipher then
+        -- Only use config cipher if no saved choice exists
         config._cipher_selected = true
         -- Save user-provided cipher choice to disk
-        save_cipher(opts.cipher)
+        save_cipher(user_provided_cipher)
     end
     
     -- Create user commands
