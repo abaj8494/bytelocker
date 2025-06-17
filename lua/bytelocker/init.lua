@@ -690,6 +690,135 @@ local function is_text_encrypted(text)
     return header == MAGIC_HEADER
 end
 
+-- BASE64 ENCODING/DECODING FOR SAFE FILE STORAGE
+local base64_chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+local function base64_encode(data)
+    local result = {}
+    local padding = 0
+    
+    for i = 1, #data, 3 do
+        local b1 = string.byte(data, i) or 0
+        local b2 = string.byte(data, i + 1) or 0
+        local b3 = string.byte(data, i + 2) or 0
+        
+        local combined = lshift(b1, 16) + lshift(b2, 8) + b3
+        
+        local c1 = band(rshift(combined, 18), 0x3F) + 1
+        local c2 = band(rshift(combined, 12), 0x3F) + 1
+        local c3 = band(rshift(combined, 6), 0x3F) + 1
+        local c4 = band(combined, 0x3F) + 1
+        
+        table.insert(result, base64_chars:sub(c1, c1))
+        table.insert(result, base64_chars:sub(c2, c2))
+        
+        if i + 1 <= #data then
+            table.insert(result, base64_chars:sub(c3, c3))
+        else
+            table.insert(result, '=')
+            padding = padding + 1
+        end
+        
+        if i + 2 <= #data then
+            table.insert(result, base64_chars:sub(c4, c4))
+        else
+            table.insert(result, '=')
+            padding = padding + 1
+        end
+    end
+    
+    return table.concat(result)
+end
+
+local function base64_decode(data)
+    -- Remove whitespace and padding
+    data = data:gsub('%s+', ''):gsub('=+$', '')
+    
+    local result = {}
+    local decode_table = {}
+    
+    -- Build decode table
+    for i = 1, #base64_chars do
+        decode_table[base64_chars:sub(i, i)] = i - 1
+    end
+    
+    for i = 1, #data, 4 do
+        local c1 = decode_table[data:sub(i, i)] or 0
+        local c2 = decode_table[data:sub(i + 1, i + 1)] or 0
+        local c3 = decode_table[data:sub(i + 2, i + 2)] or 0
+        local c4 = decode_table[data:sub(i + 3, i + 3)] or 0
+        
+        local combined = lshift(c1, 18) + lshift(c2, 12) + lshift(c3, 6) + c4
+        
+        table.insert(result, string.char(band(rshift(combined, 16), 0xFF)))
+        if i + 2 <= #data then
+            table.insert(result, string.char(band(rshift(combined, 8), 0xFF)))
+        end
+        if i + 3 <= #data then
+            table.insert(result, string.char(band(combined, 0xFF)))
+        end
+    end
+    
+    return table.concat(result)
+end
+
+-- FILE-SAFE ENCRYPTION/DECRYPTION WITH BASE64 ENCODING
+local function encrypt_for_file(content, password)
+    if not content or content == "" then
+        return ""
+    end
+    
+    -- First encrypt using the binary method
+    local binary_encrypted = encrypt_text_only(content, password)
+    
+    -- Then encode to base64 for safe file storage
+    local base64_encrypted = base64_encode(binary_encrypted)
+    
+    -- Add clear markers to identify this as an encrypted file
+    local file_header = "---BYTELOCKER-ENCRYPTED-FILE---\n"
+    local file_footer = "\n---END-BYTELOCKER-ENCRYPTED-FILE---"
+    
+    return file_header .. base64_encrypted .. file_footer
+end
+
+local function decrypt_from_file(content, password)
+    if not content or content == "" then
+        return ""
+    end
+    
+    -- Check for file format markers
+    local header = "---BYTELOCKER-ENCRYPTED-FILE---\n"
+    local footer = "\n---END-BYTELOCKER-ENCRYPTED-FILE---"
+    
+    if not content:match("^" .. header:gsub("%-", "%%-")) then
+        error("Invalid encrypted file format: missing header")
+    end
+    
+    if not content:match(footer:gsub("%-", "%%-") .. "$") then
+        error("Invalid encrypted file format: missing footer")
+    end
+    
+    -- Extract base64 content
+    local base64_content = content:sub(#header + 1, -(#footer + 1))
+    
+    -- Decode from base64
+    local success, binary_encrypted = pcall(base64_decode, base64_content)
+    if not success then
+        error("Invalid encrypted file format: corrupted base64 data")
+    end
+    
+    -- Decrypt the binary data
+    return decrypt_text_only(binary_encrypted, password)
+end
+
+-- Check if file content is encrypted (look for file markers)
+local function is_file_encrypted(content)
+    if #content == 0 then return false end
+    
+    local header = "---BYTELOCKER-ENCRYPTED-FILE---"
+    return content:sub(1, #header) == header
+end
+
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
 function M.toggle_encryption()
     -- Ensure cipher is configured before proceeding
@@ -704,7 +833,7 @@ function M.toggle_encryption()
             selection.start_line, selection.end_line, selection.start_col, selection.end_col), vim.log.levels.INFO)
         vim.notify("Selected text length: " .. #selection.text, vim.log.levels.INFO)
         
-        -- Handle selected text encryption/decryption
+        -- Handle selected text encryption/decryption (use text-only for selections)
         local password = get_password()
         if not password then
             vim.notify("Password cannot be empty", vim.log.levels.ERROR)
@@ -736,7 +865,7 @@ function M.toggle_encryption()
         return
     end
     
-    -- Handle full buffer encryption/decryption (modified to work at buffer level)
+    -- Handle full buffer encryption/decryption (use file-safe methods for full files)
     local buf = vim.api.nvim_get_current_buf()
     
     -- Get all lines from the current buffer
@@ -753,9 +882,9 @@ function M.toggle_encryption()
     local new_content
     local operation
     
-    if is_text_encrypted(content) then
+    if is_file_encrypted(content) then
         -- Attempt decryption with error handling
-        local success, result = pcall(decrypt_text_only, content, password)
+        local success, result = pcall(decrypt_from_file, content, password)
         if not success then
             vim.notify("Decryption failed: " .. result, vim.log.levels.ERROR)
             return
@@ -763,7 +892,7 @@ function M.toggle_encryption()
         new_content = result
         operation = "decrypted"
     else
-        new_content = encrypt_text_only(content, password)
+        new_content = encrypt_for_file(content, password)
         operation = "encrypted"
     end
     
@@ -786,7 +915,7 @@ function M.encrypt()
     local selection = get_visual_selection()
     
     if selection then
-        -- Handle selected text encryption
+        -- Handle selected text encryption (use text-only for selections)
         if is_text_encrypted(selection.text) then
             vim.notify("Selected text is already encrypted", vim.log.levels.WARN)
             return
@@ -807,14 +936,14 @@ function M.encrypt()
         return
     end
     
-    -- Handle full buffer encryption (modified to work at buffer level)
+    -- Handle full buffer encryption (use file-safe methods for full files)
     local buf = vim.api.nvim_get_current_buf()
     
     -- Get all lines from the current buffer
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local content = table.concat(lines, '\n')
     
-    if is_text_encrypted(content) then
+    if is_file_encrypted(content) then
         vim.notify("Buffer content is already encrypted", vim.log.levels.WARN)
         return
     end
@@ -825,7 +954,7 @@ function M.encrypt()
         return
     end
     
-    local encrypted_content = encrypt_text_only(content, password)
+    local encrypted_content = encrypt_for_file(content, password)
     
     -- Split content back into lines and set buffer content (preserve trailing newlines)
     local new_lines = vim.split(encrypted_content, '\n', { plain = true })
@@ -846,7 +975,7 @@ function M.decrypt()
     local selection = get_visual_selection()
     
     if selection then
-        -- Handle selected text decryption
+        -- Handle selected text decryption (use text-only for selections)
         if not is_text_encrypted(selection.text) then
             vim.notify("Selected text is not encrypted", vim.log.levels.WARN)
             return
@@ -871,14 +1000,14 @@ function M.decrypt()
         return
     end
     
-    -- Handle full buffer decryption (modified to work at buffer level)
+    -- Handle full buffer decryption (use file-safe methods for full files)
     local buf = vim.api.nvim_get_current_buf()
     
     -- Get all lines from the current buffer
     local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
     local content = table.concat(lines, '\n')
     
-    if not is_text_encrypted(content) then
+    if not is_file_encrypted(content) then
         vim.notify("Buffer content is not encrypted", vim.log.levels.WARN)
         return
     end
@@ -889,7 +1018,7 @@ function M.decrypt()
         return
     end
     
-    local success, decrypted_content = pcall(decrypt_text_only, content, password)
+    local success, decrypted_content = pcall(decrypt_from_file, content, password)
     if not success then
         vim.notify("Decryption failed: " .. decrypted_content, vim.log.levels.ERROR)
         return
