@@ -1,5 +1,11 @@
 # Bytelocker
 
+## Demo
+
+![useage](./demo.gif)
+
+## Intro
+
 A Neovim plugin for encrypting and decrypting files using a simple shift cipher. The plugin automatically detects whether a file is encrypted or not and provides a symmetric toggle function.
 
 ## Features
