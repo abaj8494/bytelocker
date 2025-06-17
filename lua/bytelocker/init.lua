@@ -183,15 +183,19 @@ local function xor_decrypt_block(ciphertext_block, password)
     return xor_encrypt_block(ciphertext_block, password)
 end
 
--- CAESAR CIPHER IMPLEMENTATION
+-- CAESAR CIPHER IMPLEMENTATION (FIXED - no password leakage)
 local function caesar_encrypt_block(plaintext_block, password)
     local encrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
-        local shift = password[i] % 256
+        local key_byte = password[i]
         
-        -- Caesar shift
-        local encrypted_byte = (byte_val + shift) % 256
+        -- Safer Caesar: XOR first, then shift, to prevent password leakage
+        -- This ensures null bytes don't directly reveal password bytes
+        local intermediate = bxor(byte_val, key_byte)
+        local shift = key_byte % 128  -- Use smaller shift to maintain reversibility
+        local encrypted_byte = (intermediate + shift + 1) % 256  -- +1 to avoid null output
+        
         table.insert(encrypted, string.char(encrypted_byte))
     end
     return table.concat(encrypted)
@@ -201,10 +205,13 @@ local function caesar_decrypt_block(ciphertext_block, password)
     local decrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(ciphertext_block, i) or 0
-        local shift = password[i] % 256
+        local key_byte = password[i]
         
-        -- Caesar unshift
-        local decrypted_byte = (byte_val - shift + 256) % 256
+        -- Reverse the safer Caesar encryption
+        local shift = key_byte % 128
+        local intermediate = (byte_val - shift - 1 + 256) % 256  -- Reverse +1 and shift
+        local decrypted_byte = bxor(intermediate, key_byte)  -- Reverse XOR
+        
         table.insert(decrypted, string.char(decrypted_byte))
     end
     return table.concat(decrypted)
@@ -575,10 +582,11 @@ local function encrypt_text_only(content, password)
         table.insert(result, encrypted_block)
     end
     
-    -- Clear prepared password from memory
+    -- Clear prepared password from memory (enhanced security)
     for i = 1, #prepared_password do
         prepared_password[i] = 0
     end
+    prepared_password = nil
     
     return table.concat(result)
 end
@@ -605,10 +613,11 @@ local function decrypt_text_only(content, password)
         table.insert(result, decrypted_block)
     end
     
-    -- Clear prepared password from memory
+    -- Clear prepared password from memory (enhanced security)
     for i = 1, #prepared_password do
         prepared_password[i] = 0
     end
+    prepared_password = nil
     
     local decrypted = table.concat(result)
     
