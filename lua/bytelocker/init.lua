@@ -412,7 +412,7 @@ end
 
 -- Helper function to ensure cipher is configured
 local function ensure_cipher_configured()
-    if not config.cipher or config.cipher == "shift" and not config._cipher_selected then
+    if not config._cipher_selected then
         vim.notify("Please select your encryption cipher:", vim.log.levels.INFO)
         config.cipher = select_cipher()
         config._cipher_selected = true
@@ -1099,7 +1099,6 @@ function M.setup(opts)
     if saved_cipher then
         config.cipher = saved_cipher
         config._cipher_selected = true
-        vim.notify("Loaded saved cipher: " .. CIPHERS[saved_cipher].name, vim.log.levels.INFO)
     end
     
     -- Merge user config with defaults (user-provided cipher overrides saved one)
