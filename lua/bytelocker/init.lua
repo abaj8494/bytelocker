@@ -30,6 +30,9 @@ local config = {
 local stored_password = nil
 local password_file = vim.fn.stdpath('data') .. '/bytelocker_session.dat'
 
+-- Store cipher choice persistently
+local cipher_file = vim.fn.stdpath('data') .. '/bytelocker_cipher.dat'
+
 -- Helper function to save password to disk (with basic obfuscation)
 local function save_password(password)
     if not password then return end
@@ -95,6 +98,32 @@ local function get_password()
     return password
 end
 
+-- Helper function to save cipher choice to disk
+local function save_cipher(cipher)
+    if not cipher then return end
+    
+    local file = io.open(cipher_file, 'w')
+    if file then
+        file:write(cipher)
+        file:close()
+    end
+end
+
+-- Helper function to load cipher choice from disk
+local function load_cipher()
+    local file = io.open(cipher_file, 'r')
+    if not file then return nil end
+    
+    local cipher = file:read('*all')
+    file:close()
+    
+    if cipher and cipher ~= "" and CIPHERS[cipher] then
+        return cipher
+    end
+    
+    return nil
+end
+
 -- Clear stored password
 function M.clear_password()
     stored_password = nil
@@ -104,6 +133,19 @@ function M.clear_password()
         vim.notify("Stored password cleared from memory and disk", vim.log.levels.INFO)
     else
         vim.notify("Stored password cleared from memory", vim.log.levels.INFO)
+    end
+end
+
+-- Clear stored cipher choice
+function M.clear_cipher()
+    config.cipher = "shift"  -- Reset to default
+    config._cipher_selected = false
+    -- Remove cipher file
+    local success = os.remove(cipher_file)
+    if success then
+        vim.notify("Stored cipher choice cleared and reset to default", vim.log.levels.INFO)
+    else
+        vim.notify("Cipher choice reset to default", vim.log.levels.INFO)
     end
 end
 
@@ -355,11 +397,17 @@ local function select_cipher()
     
     local choice = vim.fn.inputlist(choices)
     
+    local selected_cipher
     if choice > 0 and choice <= #cipher_keys then
-        return cipher_keys[choice]
+        selected_cipher = cipher_keys[choice]
     else
-        return "shift" -- default
+        selected_cipher = "shift" -- default
     end
+    
+    -- Save the selected cipher to disk for persistence
+    save_cipher(selected_cipher)
+    
+    return selected_cipher
 end
 
 -- Helper function to ensure cipher is configured
@@ -1039,19 +1087,29 @@ function M.change_cipher()
     local new_cipher = select_cipher()
     config.cipher = new_cipher
     config._cipher_selected = true
-    vim.notify("Cipher changed to: " .. CIPHERS[new_cipher].name, vim.log.levels.INFO)
+    vim.notify("Cipher changed to: " .. CIPHERS[new_cipher].name .. " (saved for future sessions)", vim.log.levels.INFO)
 end
 
 -- Setup function for plugin configuration
 function M.setup(opts)
     opts = opts or {}
     
-    -- Merge user config with defaults
+    -- First try to load saved cipher choice from disk
+    local saved_cipher = load_cipher()
+    if saved_cipher then
+        config.cipher = saved_cipher
+        config._cipher_selected = true
+        vim.notify("Loaded saved cipher: " .. CIPHERS[saved_cipher].name, vim.log.levels.INFO)
+    end
+    
+    -- Merge user config with defaults (user-provided cipher overrides saved one)
     config = vim.tbl_deep_extend("force", config, opts)
     
     -- Mark cipher as selected if user provided one
     if opts.cipher then
         config._cipher_selected = true
+        -- Save user-provided cipher choice to disk
+        save_cipher(opts.cipher)
     end
     
     -- Create user commands
@@ -1073,6 +1131,10 @@ function M.setup(opts)
     
     vim.api.nvim_create_user_command('BytelockerClearPassword', M.clear_password, {
         desc = 'Clear stored password'
+    })
+    
+    vim.api.nvim_create_user_command('BytelockerClearCipher', M.clear_cipher, {
+        desc = 'Clear stored cipher choice and reset to default'
     })
     
     -- Set up keymaps with 'E' (updated to use capital E)
