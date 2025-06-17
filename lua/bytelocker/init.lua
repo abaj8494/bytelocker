@@ -250,6 +250,16 @@ local function select_cipher()
     end
 end
 
+-- Helper function to ensure cipher is configured
+local function ensure_cipher_configured()
+    if not config.cipher or config.cipher == "shift" and not config._cipher_selected then
+        vim.notify("Please select your encryption cipher:", vim.log.levels.INFO)
+        config.cipher = select_cipher()
+        config._cipher_selected = true
+        vim.notify("Cipher set to: " .. CIPHERS[config.cipher].name, vim.log.levels.INFO)
+    end
+end
+
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
 function M.toggle_encryption()
     -- Ensure cipher is configured before proceeding
@@ -407,17 +417,8 @@ end
 function M.change_cipher()
     local new_cipher = select_cipher()
     config.cipher = new_cipher
+    config._cipher_selected = true
     vim.notify("Cipher changed to: " .. CIPHERS[new_cipher].name, vim.log.levels.INFO)
-end
-
--- Helper function to ensure cipher is configured
-local function ensure_cipher_configured()
-    if not config.cipher or config.cipher == "shift" and not config._cipher_selected then
-        vim.notify("Please select your encryption cipher:", vim.log.levels.INFO)
-        config.cipher = select_cipher()
-        config._cipher_selected = true
-        vim.notify("Cipher set to: " .. CIPHERS[config.cipher].name, vim.log.levels.INFO)
-    end
 end
 
 -- Setup function for plugin configuration
