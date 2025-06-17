@@ -3,6 +3,28 @@ local M = {}
 -- Constants
 local CIPHER_BLOCK_SIZE = 16
 
+-- Available cipher methods
+local CIPHERS = {
+    shift = {
+        name = "Shift Cipher",
+        description = "Bitwise rotation cipher (original method)"
+    },
+    xor = {
+        name = "XOR Cipher", 
+        description = "XOR-based encryption"
+    },
+    caesar = {
+        name = "Caesar Cipher",
+        description = "Character shifting cipher"
+    }
+}
+
+-- Default configuration
+local config = {
+    cipher = "shift",
+    setup_keymaps = false
+}
+
 -- Helper function to generate a deterministic "password" from a string
 local function prepare_password(password)
     local prepared = {}
@@ -13,50 +35,114 @@ local function prepare_password(password)
     return prepared
 end
 
--- Bitwise left rotate function
+-- Bitwise left rotate function (fixed for perfect reversibility)
 local function rol(value, bits)
     value = value % 256
+    bits = bits % 8  -- Ensure bits is within valid range
     return ((value << bits) | (value >> (8 - bits))) % 256
 end
 
--- Bitwise right rotate function
+-- Bitwise right rotate function (fixed for perfect reversibility)
 local function ror(value, bits)
     value = value % 256
+    bits = bits % 8  -- Ensure bits is within valid range
     return ((value >> bits) | (value << (8 - bits))) % 256
 end
 
--- Shift encrypt a 16-byte block
-local function shift_encrypt(plaintext_block, password)
+-- SHIFT CIPHER IMPLEMENTATION
+local function shift_encrypt_block(plaintext_block, password)
     local encrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
-        local shift_amount = password[i]
+        local shift_amount = password[i] % 8  -- Limit shift to prevent overflow
         
         -- Apply rotation encryption
-        for _ = 1, shift_amount do
-            byte_val = rol(byte_val, 1)
-        end
+        byte_val = rol(byte_val, shift_amount)
         
         table.insert(encrypted, string.char(byte_val))
     end
     return table.concat(encrypted)
 end
 
--- Shift decrypt a 16-byte block
-local function shift_decrypt(ciphertext_block, password)
+local function shift_decrypt_block(ciphertext_block, password)
     local decrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(ciphertext_block, i) or 0
-        local shift_amount = password[i]
+        local shift_amount = password[i] % 8  -- Limit shift to prevent overflow
         
         -- Apply rotation decryption (reverse of encryption)
-        for _ = 1, shift_amount do
-            byte_val = ror(byte_val, 1)
-        end
+        byte_val = ror(byte_val, shift_amount)
         
         table.insert(decrypted, string.char(byte_val))
     end
     return table.concat(decrypted)
+end
+
+-- XOR CIPHER IMPLEMENTATION
+local function xor_encrypt_block(plaintext_block, password)
+    local encrypted = {}
+    for i = 1, CIPHER_BLOCK_SIZE do
+        local byte_val = string.byte(plaintext_block, i) or 0
+        local key_byte = password[i]
+        
+        -- XOR encryption
+        local encrypted_byte = byte_val ~ key_byte
+        table.insert(encrypted, string.char(encrypted_byte))
+    end
+    return table.concat(encrypted)
+end
+
+local function xor_decrypt_block(ciphertext_block, password)
+    -- XOR is symmetric, so decryption is the same as encryption
+    return xor_encrypt_block(ciphertext_block, password)
+end
+
+-- CAESAR CIPHER IMPLEMENTATION
+local function caesar_encrypt_block(plaintext_block, password)
+    local encrypted = {}
+    for i = 1, CIPHER_BLOCK_SIZE do
+        local byte_val = string.byte(plaintext_block, i) or 0
+        local shift = password[i] % 256
+        
+        -- Caesar shift
+        local encrypted_byte = (byte_val + shift) % 256
+        table.insert(encrypted, string.char(encrypted_byte))
+    end
+    return table.concat(encrypted)
+end
+
+local function caesar_decrypt_block(ciphertext_block, password)
+    local decrypted = {}
+    for i = 1, CIPHER_BLOCK_SIZE do
+        local byte_val = string.byte(ciphertext_block, i) or 0
+        local shift = password[i] % 256
+        
+        -- Caesar unshift
+        local decrypted_byte = (byte_val - shift + 256) % 256
+        table.insert(decrypted, string.char(decrypted_byte))
+    end
+    return table.concat(decrypted)
+end
+
+-- Cipher method dispatcher
+local function encrypt_block(plaintext_block, password, cipher_type)
+    if cipher_type == "xor" then
+        return xor_encrypt_block(plaintext_block, password)
+    elseif cipher_type == "caesar" then
+        return caesar_encrypt_block(plaintext_block, password)
+    else -- default to shift
+        return shift_encrypt_block(plaintext_block, password)
+    end
+end
+
+local function decrypt_block(ciphertext_block, password, cipher_type)
+    if cipher_type == "xor" then
+        return xor_decrypt_block(ciphertext_block, password)
+    elseif cipher_type == "caesar" then
+        return caesar_decrypt_block(ciphertext_block, password)
+    else -- default to shift
+        return shift_decrypt_block(ciphertext_block, password)
+    end
 end
 
 -- Check if file is encrypted (first byte is null)
@@ -67,10 +153,20 @@ local function is_encrypted(content)
     return string.byte(content, 1) == 0
 end
 
--- Encrypt file content
+-- IMPROVED ENCRYPTION: Store original length to prevent data loss
 local function encrypt_content(content, password)
     local prepared_password = prepare_password(password)
-    local result = {string.char(0)} -- Start with null byte to mark as encrypted
+    
+    -- Store the original content length in the first 4 bytes after the null marker
+    local original_length = #content
+    local length_bytes = string.char(
+        (original_length >> 24) & 0xFF,
+        (original_length >> 16) & 0xFF,
+        (original_length >> 8) & 0xFF,
+        original_length & 0xFF
+    )
+    
+    local result = {string.char(0), length_bytes} -- Start with null byte + length
     
     -- Process content in 16-byte blocks
     for i = 1, #content, CIPHER_BLOCK_SIZE do
@@ -81,19 +177,31 @@ local function encrypt_content(content, password)
             block = block .. string.char(0)
         end
         
-        local encrypted_block = shift_encrypt(block, prepared_password)
+        local encrypted_block = encrypt_block(block, prepared_password, config.cipher)
         table.insert(result, encrypted_block)
     end
     
     return table.concat(result)
 end
 
--- Decrypt file content
+-- IMPROVED DECRYPTION: Use stored length to restore exact original content
 local function decrypt_content(content, password)
     local prepared_password = prepare_password(password)
     
-    -- Skip the first null byte that marks the file as encrypted
-    content = content:sub(2)
+    -- Skip the first null byte and read the original length
+    if #content < 5 then
+        error("Invalid encrypted file format")
+    end
+    
+    local length_bytes = content:sub(2, 5)
+    local original_length = 
+        (string.byte(length_bytes, 1) << 24) +
+        (string.byte(length_bytes, 2) << 16) +
+        (string.byte(length_bytes, 3) << 8) +
+        string.byte(length_bytes, 4)
+    
+    -- Skip null byte and length bytes
+    content = content:sub(6)
     
     local result = {}
     
@@ -106,22 +214,36 @@ local function decrypt_content(content, password)
             block = block .. string.char(0)
         end
         
-        local decrypted_block = shift_decrypt(block, prepared_password)
+        local decrypted_block = decrypt_block(block, prepared_password, config.cipher)
         table.insert(result, decrypted_block)
     end
     
     local decrypted = table.concat(result)
     
-    -- Remove trailing null characters
-    local last_non_null = #decrypted
-    for i = #decrypted, 1, -1 do
-        if string.byte(decrypted, i) ~= 0 then
-            last_non_null = i
-            break
-        end
+    -- Return exactly the original length to prevent data loss
+    return decrypted:sub(1, original_length)
+end
+
+-- User cipher selection
+local function select_cipher()
+    local choices = {}
+    local cipher_keys = {}
+    
+    for key, cipher in pairs(CIPHERS) do
+        table.insert(choices, string.format("%s - %s", cipher.name, cipher.description))
+        table.insert(cipher_keys, key)
     end
     
-    return decrypted:sub(1, last_non_null)
+    local choice = vim.fn.inputlist(vim.tbl_flatten({
+        "Select encryption cipher:",
+        choices
+    }))
+    
+    if choice > 0 and choice <= #cipher_keys then
+        return cipher_keys[choice]
+    else
+        return "shift" -- default
+    end
 end
 
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
@@ -175,7 +297,7 @@ function M.toggle_encryption()
     -- Reload the buffer
     vim.cmd("edit!")
     
-    vim.notify("File " .. operation .. " successfully", vim.log.levels.INFO)
+    vim.notify("File " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
 
 -- Encrypt current buffer content
@@ -220,7 +342,7 @@ function M.encrypt()
     file:close()
     
     vim.cmd("edit!")
-    vim.notify("File encrypted successfully", vim.log.levels.INFO)
+    vim.notify("File encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
 
 -- Decrypt current buffer content
@@ -268,9 +390,25 @@ function M.decrypt()
     vim.notify("File decrypted successfully", vim.log.levels.INFO)
 end
 
+-- Change cipher method
+function M.change_cipher()
+    local new_cipher = select_cipher()
+    config.cipher = new_cipher
+    vim.notify("Cipher changed to: " .. CIPHERS[new_cipher].name, vim.log.levels.INFO)
+end
+
 -- Setup function for plugin configuration
 function M.setup(opts)
     opts = opts or {}
+    
+    -- Merge user config with defaults
+    config = vim.tbl_deep_extend("force", config, opts)
+    
+    -- If cipher is not set, prompt user to select one
+    if not opts.cipher then
+        vim.notify("Welcome to Bytelocker! Please select your default cipher.", vim.log.levels.INFO)
+        config.cipher = select_cipher()
+    end
     
     -- Create user commands
     vim.api.nvim_create_user_command('BytelockerToggle', M.toggle_encryption, {
@@ -285,11 +423,16 @@ function M.setup(opts)
         desc = 'Decrypt current file'
     })
     
-    -- Set up default keymaps if requested
-    if opts.setup_keymaps then
-        vim.keymap.set('n', '<leader>bt', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
-        vim.keymap.set('n', '<leader>be', M.encrypt, { desc = 'Bytelocker: Encrypt file' })
-        vim.keymap.set('n', '<leader>bd', M.decrypt, { desc = 'Bytelocker: Decrypt file' })
+    vim.api.nvim_create_user_command('BytelockerChangeCipher', M.change_cipher, {
+        desc = 'Change the encryption cipher method'
+    })
+    
+    -- Set up keymaps with 'E' (updated to use capital E)
+    if config.setup_keymaps then
+        vim.keymap.set('n', '<leader>Et', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
+        vim.keymap.set('n', '<leader>Ee', M.encrypt, { desc = 'Bytelocker: Encrypt file' })
+        vim.keymap.set('n', '<leader>Ed', M.decrypt, { desc = 'Bytelocker: Decrypt file' })
+        vim.keymap.set('n', '<leader>Ec', M.change_cipher, { desc = 'Bytelocker: Change cipher' })
     end
 end
 

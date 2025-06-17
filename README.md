@@ -4,10 +4,12 @@ A Neovim plugin for encrypting and decrypting files using a simple shift cipher.
 
 ## Features
 
+- **Multiple cipher methods**: Choose from Shift, XOR, or Caesar ciphers
 - **Automatic detection**: Detects if a file is encrypted or plain text
 - **Toggle functionality**: Single command to encrypt plain text files or decrypt encrypted files
 - **Separate encrypt/decrypt**: Individual commands for explicit encryption or decryption
-- **Password protection**: Uses password-based encryption with shift cipher
+- **Password protection**: Uses password-based encryption with your chosen cipher
+- **Data integrity**: Improved algorithm prevents data loss during encryption/decryption cycles
 - **User-friendly**: Integrates seamlessly with Neovim workflow
 
 ## Installation
@@ -25,7 +27,8 @@ use 'your-username/bytelocker'
     'your-username/bytelocker',
     config = function()
         require('bytelocker').setup({
-            setup_keymaps = true  -- Optional: set up default keymaps
+            setup_keymaps = true,  -- Optional: set up default keymaps
+            cipher = "shift"       -- Optional: pre-select cipher ("shift", "xor", "caesar")
         })
     end
 }
@@ -44,38 +47,57 @@ Plug 'your-username/bytelocker'
 - `:BytelockerToggle` - Automatically encrypt plain text files or decrypt encrypted files
 - `:BytelockerEncrypt` - Explicitly encrypt the current file
 - `:BytelockerDecrypt` - Explicitly decrypt the current file
+- `:BytelockerChangeCipher` - Change the encryption cipher method
 
 ### Default Keymaps (optional)
 
 If you enable `setup_keymaps = true` in the setup configuration:
 
-- `<leader>bt` - Toggle encryption/decryption
-- `<leader>be` - Encrypt file
-- `<leader>bd` - Decrypt file
+- `<leader>Et` - Toggle encryption/decryption
+- `<leader>Ee` - Encrypt file
+- `<leader>Ed` - Decrypt file
+- `<leader>Ec` - Change cipher method
 
 ### Configuration
 
 ```lua
 require('bytelocker').setup({
     setup_keymaps = true,  -- Set to true to enable default keymaps
+    cipher = "shift"       -- Choose cipher: "shift", "xor", or "caesar"
+                          -- If not specified, you'll be prompted to select one
 })
 ```
+
+### Available Ciphers
+
+- **Shift Cipher** (default): Bitwise rotation cipher - same as original C implementation
+- **XOR Cipher**: XOR-based encryption - simple but effective
+- **Caesar Cipher**: Character shifting cipher - classic substitution method
 
 ## How it works
 
 1. **Detection**: The plugin checks the first byte of a file to determine if it's encrypted
-   - If the first byte is a printable ASCII character (32-126), the file is considered plain text
+   - If the first byte is a printable ASCII character (32-126), the file is considered plain text  
    - If the first byte is null (0), the file is considered encrypted
 
 2. **Encryption**: 
-   - Adds a null byte at the beginning to mark the file as encrypted
-   - Processes the content in 16-byte blocks
-   - Uses a shift cipher based on the provided password
+   - Adds a null byte marker followed by the original file length (4 bytes)
+   - Processes the content in 16-byte blocks using your chosen cipher
+   - Pads incomplete blocks with null characters
 
 3. **Decryption**:
-   - Removes the null byte marker
-   - Processes encrypted blocks back to plain text
-   - Removes padding null characters
+   - Reads the null byte marker and original file length
+   - Processes encrypted blocks back to plain text using the same cipher
+   - Restores the exact original file length to prevent data loss
+
+## Data Integrity Improvements
+
+This version fixes potential data loss issues from the original C implementation:
+
+- **Length preservation**: Original file length is stored in the encrypted file header
+- **Perfect reversibility**: All cipher implementations ensure encrypt→decrypt cycles preserve data
+- **Trailing data protection**: Files with trailing null bytes or binary data are handled correctly
+- **Overflow protection**: Bit operations are properly bounded to prevent data corruption
 
 ## Security Note
 
