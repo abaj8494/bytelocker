@@ -25,6 +25,9 @@ local config = {
     setup_keymaps = false
 }
 
+-- Store password in memory
+local stored_password = nil
+
 -- Helper function to generate a deterministic "password" from a string
 local function prepare_password(password)
     local prepared = {}
@@ -260,11 +263,204 @@ local function ensure_cipher_configured()
     end
 end
 
+-- Helper function to get or prompt for password
+local function get_password()
+    if stored_password then
+        return stored_password
+    end
+    
+    local password = vim.fn.inputsecret("Enter password: ")
+    if password == "" then
+        return nil
+    end
+    
+    stored_password = password
+    vim.notify("Password stored for this session", vim.log.levels.INFO)
+    return password
+end
+
+-- Clear stored password
+function M.clear_password()
+    stored_password = nil
+    vim.notify("Stored password cleared", vim.log.levels.INFO)
+end
+
+-- Helper function to check if there's a visual selection
+local function get_visual_selection()
+    local mode = vim.fn.mode()
+    if mode ~= 'v' and mode ~= 'V' and mode ~= '' then
+        return nil
+    end
+    
+    local start_pos = vim.fn.getpos("'<")
+    local end_pos = vim.fn.getpos("'>")
+    
+    if start_pos[2] == 0 or end_pos[2] == 0 then
+        return nil
+    end
+    
+    local start_line = start_pos[2]
+    local start_col = start_pos[3]
+    local end_line = end_pos[2]
+    local end_col = end_pos[3]
+    
+    local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
+    
+    if #lines == 0 then
+        return nil
+    end
+    
+    -- Handle single line selection
+    if #lines == 1 then
+        local text = lines[1]:sub(start_col, end_col)
+        return {
+            text = text,
+            start_line = start_line,
+            start_col = start_col,
+            end_line = end_line,
+            end_col = end_col
+        }
+    end
+    
+    -- Handle multi-line selection
+    lines[1] = lines[1]:sub(start_col)
+    lines[#lines] = lines[#lines]:sub(1, end_col)
+    
+    return {
+        text = table.concat(lines, '\n'),
+        start_line = start_line,
+        start_col = start_col,
+        end_line = end_line,
+        end_col = end_col
+    }
+end
+
+-- Helper function to replace visual selection with new text
+local function replace_visual_selection(selection, new_text)
+    local lines = vim.split(new_text, '\n')
+    
+    if #lines == 1 then
+        -- Single line replacement
+        local current_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
+        local before = current_line:sub(1, selection.start_col - 1)
+        local after = current_line:sub(selection.end_col + 1)
+        local new_line = before .. new_text .. after
+        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.start_line, false, {new_line})
+    else
+        -- Multi-line replacement
+        local first_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
+        local last_line = vim.api.nvim_buf_get_lines(0, selection.end_line - 1, selection.end_line, false)[1]
+        
+        local before = first_line:sub(1, selection.start_col - 1)
+        local after = last_line:sub(selection.end_col + 1)
+        
+        lines[1] = before .. lines[1]
+        lines[#lines] = lines[#lines] .. after
+        
+        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.end_line, false, lines)
+    end
+end
+
+-- Encrypt/decrypt text only (without file format headers)
+local function encrypt_text_only(content, password)
+    local prepared_password = prepare_password(password)
+    local result = {}
+    
+    -- Process content in 16-byte blocks
+    for i = 1, #content, CIPHER_BLOCK_SIZE do
+        local block = content:sub(i, i + CIPHER_BLOCK_SIZE - 1)
+        
+        -- Pad block to 16 bytes with null characters
+        while #block < CIPHER_BLOCK_SIZE do
+            block = block .. string.char(0)
+        end
+        
+        local encrypted_block = encrypt_block(block, prepared_password, config.cipher)
+        table.insert(result, encrypted_block)
+    end
+    
+    return table.concat(result)
+end
+
+local function decrypt_text_only(content, password)
+    local prepared_password = prepare_password(password)
+    local result = {}
+    
+    -- Process content in 16-byte blocks
+    for i = 1, #content, CIPHER_BLOCK_SIZE do
+        local block = content:sub(i, i + CIPHER_BLOCK_SIZE - 1)
+        
+        -- Pad block to 16 bytes with null characters if needed
+        while #block < CIPHER_BLOCK_SIZE do
+            block = block .. string.char(0)
+        end
+        
+        local decrypted_block = decrypt_block(block, prepared_password, config.cipher)
+        table.insert(result, decrypted_block)
+    end
+    
+    local decrypted = table.concat(result)
+    
+    -- Remove trailing null characters that were added as padding
+    return decrypted:gsub("%z+$", "")
+end
+
+-- Check if text appears to be encrypted (contains many null or non-printable characters)
+local function is_text_encrypted(text)
+    if #text == 0 then return false end
+    
+    local null_count = 0
+    local non_printable_count = 0
+    
+    for i = 1, math.min(#text, 100) do -- Check first 100 characters
+        local byte = string.byte(text, i)
+        if byte == 0 then
+            null_count = null_count + 1
+        elseif byte < 32 or byte > 126 then
+            non_printable_count = non_printable_count + 1
+        end
+    end
+    
+    -- Consider encrypted if more than 20% are null or non-printable
+    return (null_count + non_printable_count) / math.min(#text, 100) > 0.2
+end
+
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
 function M.toggle_encryption()
     -- Ensure cipher is configured before proceeding
     ensure_cipher_configured()
     
+    -- Check if there's a visual selection
+    local selection = get_visual_selection()
+    
+    if selection then
+        -- Handle selected text encryption/decryption
+        local password = get_password()
+        if not password then
+            vim.notify("Password cannot be empty", vim.log.levels.ERROR)
+            return
+        end
+        
+        local new_text
+        local operation
+        
+        if is_text_encrypted(selection.text) then
+            new_text = decrypt_text_only(selection.text, password)
+            operation = "decrypted"
+        else
+            new_text = encrypt_text_only(selection.text, password)
+            operation = "encrypted"
+        end
+        
+        replace_visual_selection(selection, new_text)
+        vim.notify("Selected text " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
+        
+        -- Exit visual mode
+        vim.cmd("normal! ")
+        return
+    end
+    
+    -- Handle full file encryption/decryption (existing logic)
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -284,8 +480,8 @@ function M.toggle_encryption()
     file:close()
     
     -- Get password from user
-    local password = vim.fn.inputsecret("Enter password: ")
-    if password == "" then
+    local password = get_password()
+    if not password then
         vim.notify("Password cannot be empty", vim.log.levels.ERROR)
         return
     end
@@ -322,6 +518,32 @@ function M.encrypt()
     -- Ensure cipher is configured before proceeding
     ensure_cipher_configured()
     
+    -- Check if there's a visual selection
+    local selection = get_visual_selection()
+    
+    if selection then
+        -- Handle selected text encryption
+        if is_text_encrypted(selection.text) then
+            vim.notify("Selected text is already encrypted", vim.log.levels.WARN)
+            return
+        end
+        
+        local password = get_password()
+        if not password then
+            vim.notify("Password cannot be empty", vim.log.levels.ERROR)
+            return
+        end
+        
+        local encrypted_text = encrypt_text_only(selection.text, password)
+        replace_visual_selection(selection, encrypted_text)
+        vim.notify("Selected text encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
+        
+        -- Exit visual mode
+        vim.cmd("normal! ")
+        return
+    end
+    
+    -- Handle full file encryption (existing logic)
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -344,8 +566,8 @@ function M.encrypt()
         return
     end
     
-    local password = vim.fn.inputsecret("Enter password: ")
-    if password == "" then
+    local password = get_password()
+    if not password then
         vim.notify("Password cannot be empty", vim.log.levels.ERROR)
         return
     end
@@ -370,6 +592,32 @@ function M.decrypt()
     -- Ensure cipher is configured before proceeding
     ensure_cipher_configured()
     
+    -- Check if there's a visual selection
+    local selection = get_visual_selection()
+    
+    if selection then
+        -- Handle selected text decryption
+        if not is_text_encrypted(selection.text) then
+            vim.notify("Selected text is not encrypted", vim.log.levels.WARN)
+            return
+        end
+        
+        local password = get_password()
+        if not password then
+            vim.notify("Password cannot be empty", vim.log.levels.ERROR)
+            return
+        end
+        
+        local decrypted_text = decrypt_text_only(selection.text, password)
+        replace_visual_selection(selection, decrypted_text)
+        vim.notify("Selected text decrypted successfully", vim.log.levels.INFO)
+        
+        -- Exit visual mode
+        vim.cmd("normal! ")
+        return
+    end
+    
+    -- Handle full file decryption (existing logic)
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -392,8 +640,8 @@ function M.decrypt()
         return
     end
     
-    local password = vim.fn.inputsecret("Enter password: ")
-    if password == "" then
+    local password = get_password()
+    if not password then
         vim.notify("Password cannot be empty", vim.log.levels.ERROR)
         return
     end
@@ -435,25 +683,31 @@ function M.setup(opts)
     
     -- Create user commands
     vim.api.nvim_create_user_command('BytelockerToggle', M.toggle_encryption, {
-        desc = 'Toggle encryption/decryption of current file'
+        desc = 'Toggle encryption/decryption of current file or selected text'
     })
     
     vim.api.nvim_create_user_command('BytelockerEncrypt', M.encrypt, {
-        desc = 'Encrypt current file'
+        desc = 'Encrypt current file or selected text'
     })
     
     vim.api.nvim_create_user_command('BytelockerDecrypt', M.decrypt, {
-        desc = 'Decrypt current file'
+        desc = 'Decrypt current file or selected text'
     })
     
     vim.api.nvim_create_user_command('BytelockerChangeCipher', M.change_cipher, {
         desc = 'Change the encryption cipher method'
     })
     
+    vim.api.nvim_create_user_command('BytelockerClearPassword', M.clear_password, {
+        desc = 'Clear stored password'
+    })
+    
     -- Set up keymaps with 'E' (updated to use capital E)
     if config.setup_keymaps then
         vim.keymap.set('n', 'E', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
+        vim.keymap.set('v', 'E', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption (selection)' })
         vim.keymap.set('n', '<leader>E', M.change_cipher, { desc = 'Bytelocker: Change cipher' })
+        vim.keymap.set('n', '<leader>eP', M.clear_password, { desc = 'Bytelocker: Clear password' })
     end
 end
 
