@@ -98,10 +98,3 @@ This version fixes potential data loss issues from the original C implementation
 - **Trailing data protection**: Files with trailing null bytes or binary data are handled correctly
 - **Overflow protection**: Bit operations are properly bounded to prevent data corruption
 
-## Security Note
-
-⚠️ **Warning**: This plugin uses a simple shift cipher which provides only basic obfuscation, not cryptographic security. It should not be used for protecting sensitive data. For real security, use proper encryption tools like GPG.
-
-## License
-
-MIT License
