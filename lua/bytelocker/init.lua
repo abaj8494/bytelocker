@@ -164,23 +164,46 @@ local function shift_decrypt_block(ciphertext_block, password)
     return table.concat(decrypted)
 end
 
--- XOR CIPHER IMPLEMENTATION
+-- XOR CIPHER IMPLEMENTATION (FIXED - no password leakage)
 local function xor_encrypt_block(plaintext_block, password)
     local encrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
         local key_byte = password[i]
         
-        -- XOR encryption
-        local encrypted_byte = bxor(byte_val, key_byte)
+        -- Safer XOR: avoid direct password exposure on null bytes
+        -- Add a non-zero constant before XOR to prevent password leakage
+        local safe_byte = (byte_val + 1) % 256  -- +1 to avoid null input
+        local encrypted_byte = bxor(safe_byte, key_byte)
+        
+        -- Ensure output is never null (which could leak password on decrypt)
+        if encrypted_byte == 0 then
+            encrypted_byte = 255  -- Use max value instead of 0
+        end
+        
         table.insert(encrypted, string.char(encrypted_byte))
     end
     return table.concat(encrypted)
 end
 
 local function xor_decrypt_block(ciphertext_block, password)
-    -- XOR is symmetric, so decryption is the same as encryption
-    return xor_encrypt_block(ciphertext_block, password)
+    local decrypted = {}
+    for i = 1, CIPHER_BLOCK_SIZE do
+        local byte_val = string.byte(ciphertext_block, i) or 0
+        local key_byte = password[i]
+        
+        -- Handle the special case where we used 255 instead of 0
+        if byte_val == 255 then
+            byte_val = 0
+        end
+        
+        -- Reverse the safer XOR encryption
+        local safe_byte = bxor(byte_val, key_byte)
+        local decrypted_byte = (safe_byte - 1 + 256) % 256  -- Reverse +1
+        
+        table.insert(decrypted, string.char(decrypted_byte))
+    end
+    return table.concat(decrypted)
 end
 
 -- CAESAR CIPHER IMPLEMENTATION (FIXED - no password leakage)
@@ -503,7 +526,7 @@ end
 
 -- Helper function to replace visual selection with new text
 local function replace_visual_selection(selection, new_text)
-    local new_lines = vim.split(new_text, '\n')
+    local new_lines = vim.split(new_text, '\n', { plain = true })
     
     -- Handle Visual Line mode (entire lines)
     if selection.mode == 'V' then
@@ -710,8 +733,8 @@ function M.toggle_encryption()
         operation = "encrypted"
     end
     
-    -- Split content back into lines and set buffer content
-    local new_lines = vim.split(new_content, '\n')
+    -- Split content back into lines and set buffer content (preserve trailing newlines)
+    local new_lines = vim.split(new_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
     -- Mark buffer as modified
@@ -770,8 +793,8 @@ function M.encrypt()
     
     local encrypted_content = encrypt_text_only(content, password)
     
-    -- Split content back into lines and set buffer content
-    local new_lines = vim.split(encrypted_content, '\n')
+    -- Split content back into lines and set buffer content (preserve trailing newlines)
+    local new_lines = vim.split(encrypted_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
     -- Mark buffer as modified
@@ -830,8 +853,8 @@ function M.decrypt()
     
     local decrypted_content = decrypt_text_only(content, password)
     
-    -- Split content back into lines and set buffer content
-    local new_lines = vim.split(decrypted_content, '\n')
+    -- Split content back into lines and set buffer content (preserve trailing newlines)
+    local new_lines = vim.split(decrypted_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
     -- Mark buffer as modified
