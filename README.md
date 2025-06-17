@@ -17,14 +17,14 @@ A Neovim plugin for encrypting and decrypting files using a simple shift cipher.
 ### Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 
 ```lua
-use 'your-username/bytelocker'
+use 'abaj8494/bytelocker'
 ```
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
 {
-    'your-username/bytelocker',
+    'abaj8494/bytelocker',
     config = function()
         require('bytelocker').setup({
             setup_keymaps = true,  -- Optional: set up default keymaps
@@ -37,7 +37,7 @@ use 'your-username/bytelocker'
 ### Using [vim-plug](https://github.com/junegunn/vim-plug)
 
 ```vim
-Plug 'your-username/bytelocker'
+Plug 'abaj8494/bytelocker'
 ```
 
 ## Usage
