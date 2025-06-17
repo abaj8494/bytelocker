@@ -909,7 +909,6 @@ function M.setup(opts)
         vim.keymap.set('n', 'E', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
         vim.keymap.set('v', 'E', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption (selection)' })
         vim.keymap.set('n', '<leader>E', M.change_cipher, { desc = 'Bytelocker: Change cipher' })
-        vim.keymap.set('n', '<leader>eP', M.clear_password, { desc = 'Bytelocker: Clear password' })
     end
 end
 
