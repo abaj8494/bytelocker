@@ -25,8 +25,86 @@ local config = {
     setup_keymaps = false
 }
 
--- Store password in memory
+-- Store password in memory and persistently
 local stored_password = nil
+local password_file = vim.fn.stdpath('data') .. '/bytelocker_session.dat'
+
+-- Helper function to save password to disk (with basic obfuscation)
+local function save_password(password)
+    if not password then return end
+    
+    -- Basic obfuscation (not real security, just to avoid plain text)
+    local obfuscated = {}
+    for i = 1, #password do
+        local byte = string.byte(password, i)
+        table.insert(obfuscated, string.char((byte + 42) % 256))
+    end
+    
+    local file = io.open(password_file, 'wb')
+    if file then
+        file:write(table.concat(obfuscated))
+        file:close()
+    end
+end
+
+-- Helper function to load password from disk
+local function load_password()
+    local file = io.open(password_file, 'rb')
+    if not file then return nil end
+    
+    local obfuscated = file:read('*all')
+    file:close()
+    
+    if #obfuscated == 0 then return nil end
+    
+    -- Deobfuscate
+    local password = {}
+    for i = 1, #obfuscated do
+        local byte = string.byte(obfuscated, i)
+        table.insert(password, string.char((byte - 42) % 256))
+    end
+    
+    return table.concat(password)
+end
+
+-- Helper function to get or prompt for password
+local function get_password()
+    -- First check memory
+    if stored_password then
+        return stored_password
+    end
+    
+    -- Then check disk
+    local saved_password = load_password()
+    if saved_password and saved_password ~= "" then
+        stored_password = saved_password
+        vim.notify("Using saved password from previous session", vim.log.levels.INFO)
+        return saved_password
+    end
+    
+    -- Finally prompt user
+    local password = vim.fn.inputsecret("Enter password: ")
+    if password == "" then
+        return nil
+    end
+    
+    stored_password = password
+    save_password(password)
+    vim.notify("Password stored for future sessions", vim.log.levels.INFO)
+    return password
+end
+
+-- Clear stored password
+function M.clear_password()
+    stored_password = nil
+    -- Remove password file
+    local success = os.remove(password_file)
+    if success then
+        vim.notify("Stored password cleared from memory and disk", vim.log.levels.INFO)
+    else
+        vim.notify("Stored password cleared from memory", vim.log.levels.INFO)
+    end
+end
 
 -- Helper function to generate a deterministic "password" from a string
 local function prepare_password(password)
@@ -263,33 +341,19 @@ local function ensure_cipher_configured()
     end
 end
 
--- Helper function to get or prompt for password
-local function get_password()
-    if stored_password then
-        return stored_password
-    end
-    
-    local password = vim.fn.inputsecret("Enter password: ")
-    if password == "" then
-        return nil
-    end
-    
-    stored_password = password
-    vim.notify("Password stored for this session", vim.log.levels.INFO)
-    return password
-end
-
--- Clear stored password
-function M.clear_password()
-    stored_password = nil
-    vim.notify("Stored password cleared", vim.log.levels.INFO)
-end
-
 -- Helper function to check if there's a visual selection
 local function get_visual_selection()
-    local mode = vim.fn.mode()
-    if mode ~= 'v' and mode ~= 'V' and mode ~= '' then
-        return nil
+    -- Check if we're in visual mode by looking at the mode
+    local mode = vim.api.nvim_get_mode().mode
+    if not (mode == 'v' or mode == 'V' or mode == '') then
+        -- Not in visual mode, but check if there are visual marks
+        local start_pos = vim.fn.getpos("'<")
+        local end_pos = vim.fn.getpos("'>")
+        
+        -- If no marks or marks are at position 0, no selection
+        if start_pos[2] == 0 or end_pos[2] == 0 then
+            return nil
+        end
     end
     
     local start_pos = vim.fn.getpos("'<")
@@ -361,8 +425,13 @@ local function replace_visual_selection(selection, new_text)
     end
 end
 
--- Encrypt/decrypt text only (without file format headers)
+-- Encrypt/decrypt text only (without file format headers) - SECURE VERSION
 local function encrypt_text_only(content, password)
+    -- Make sure we don't accidentally include password in output
+    if not content or content == "" then
+        return ""
+    end
+    
     local prepared_password = prepare_password(password)
     local result = {}
     
@@ -379,10 +448,20 @@ local function encrypt_text_only(content, password)
         table.insert(result, encrypted_block)
     end
     
+    -- Clear prepared password from memory
+    for i = 1, #prepared_password do
+        prepared_password[i] = 0
+    end
+    
     return table.concat(result)
 end
 
 local function decrypt_text_only(content, password)
+    -- Make sure we don't accidentally include password in output
+    if not content or content == "" then
+        return ""
+    end
+    
     local prepared_password = prepare_password(password)
     local result = {}
     
@@ -397,6 +476,11 @@ local function decrypt_text_only(content, password)
         
         local decrypted_block = decrypt_block(block, prepared_password, config.cipher)
         table.insert(result, decrypted_block)
+    end
+    
+    -- Clear prepared password from memory
+    for i = 1, #prepared_password do
+        prepared_password[i] = 0
     end
     
     local decrypted = table.concat(result)
@@ -455,8 +539,8 @@ function M.toggle_encryption()
         replace_visual_selection(selection, new_text)
         vim.notify("Selected text " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
         
-        -- Exit visual mode
-        vim.cmd("normal! ")
+        -- Exit visual mode properly
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
         return
     end
     
@@ -538,8 +622,8 @@ function M.encrypt()
         replace_visual_selection(selection, encrypted_text)
         vim.notify("Selected text encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
         
-        -- Exit visual mode
-        vim.cmd("normal! ")
+        -- Exit visual mode properly
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
         return
     end
     
@@ -612,8 +696,8 @@ function M.decrypt()
         replace_visual_selection(selection, decrypted_text)
         vim.notify("Selected text decrypted successfully", vim.log.levels.INFO)
         
-        -- Exit visual mode
-        vim.cmd("normal! ")
+        -- Exit visual mode properly
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<Esc>', true, false, true), 'n', false)
         return
     end
     
