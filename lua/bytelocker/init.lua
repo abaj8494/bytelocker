@@ -341,9 +341,72 @@ local function ensure_cipher_configured()
     end
 end
 
--- Helper function to check if there's a visual selection
+-- Helper function to get current visual selection (works in visual mode)
+local function get_current_visual_selection()
+    local mode = vim.api.nvim_get_mode().mode
+    
+    if mode == 'v' or mode == 'V' or mode == '' then
+        -- We're in visual mode, get the selection directly
+        local start_pos = vim.fn.getpos('.')  -- cursor position
+        local other_pos = vim.fn.getpos('v')  -- other end of selection
+        
+        -- Determine start and end
+        local start_line, start_col, end_line, end_col
+        if start_pos[2] < other_pos[2] or (start_pos[2] == other_pos[2] and start_pos[3] <= other_pos[3]) then
+            start_line, start_col = start_pos[2], start_pos[3]
+            end_line, end_col = other_pos[2], other_pos[3]
+        else
+            start_line, start_col = other_pos[2], other_pos[3]
+            end_line, end_col = start_pos[2], start_pos[3]
+        end
+        
+        -- Get the selected text
+        local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
+        if #lines == 0 then return nil end
+        
+        local text
+        if start_line == end_line then
+            -- Single line selection
+            text = lines[1]:sub(start_col, end_col)
+        else
+            -- Multi-line selection
+            local first_line = lines[1]:sub(start_col)
+            local last_line = lines[#lines]:sub(1, end_col)
+            
+            local selected_lines = {first_line}
+            for i = 2, #lines - 1 do
+                table.insert(selected_lines, lines[i])
+            end
+            if #lines > 1 then
+                table.insert(selected_lines, last_line)
+            end
+            text = table.concat(selected_lines, '\n')
+        end
+        
+        return {
+            text = text,
+            start_line = start_line,
+            start_col = start_col,
+            end_line = end_line,
+            end_col = end_col
+        }
+    end
+    
+    return nil
+end
+
+-- Helper function to check if there's a visual selection (fallback method)
 local function get_visual_selection()
-    -- Check if we have valid visual marks
+    -- First try to get current visual selection if in visual mode
+    local current_selection = get_current_visual_selection()
+    if current_selection then
+        vim.notify(string.format("Active visual selection: lines %d-%d, cols %d-%d", 
+            current_selection.start_line, current_selection.end_line, 
+            current_selection.start_col, current_selection.end_col), vim.log.levels.INFO)
+        return current_selection
+    end
+    
+    -- Fallback: check visual marks (for when called after exiting visual mode)
     local start_pos = vim.fn.getpos("'<")
     local end_pos = vim.fn.getpos("'>")
     
@@ -357,15 +420,9 @@ local function get_visual_selection()
         return nil
     end
     
-    -- Get current mode to see if we're in visual mode
-    local mode = vim.api.nvim_get_mode().mode
-    local in_visual_mode = (mode == 'v' or mode == 'V' or mode == '')
-    
-    -- If not in visual mode, only proceed if marks seem valid (different positions)
-    if not in_visual_mode then
-        if start_pos[2] == end_pos[2] and start_pos[3] == end_pos[3] then
-            return nil
-        end
+    -- Check if marks are at the same position (no real selection)
+    if start_pos[2] == end_pos[2] and start_pos[3] == end_pos[3] then
+        return nil
     end
     
     local start_line = start_pos[2]
