@@ -544,24 +544,12 @@ function M.toggle_encryption()
         return
     end
     
-    -- Handle full file encryption/decryption (existing logic)
+    -- Handle full buffer encryption/decryption (modified to work at buffer level)
     local buf = vim.api.nvim_get_current_buf()
-    local filename = vim.api.nvim_buf_get_name(buf)
     
-    if filename == "" then
-        vim.notify("Buffer has no filename", vim.log.levels.ERROR)
-        return
-    end
-    
-    -- Check if file exists and we can read it
-    local file = io.open(filename, "rb")
-    if not file then
-        vim.notify("Cannot read file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
-    
-    local content = file:read("*all")
-    file:close()
+    -- Get all lines from the current buffer
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local content = table.concat(lines, '\n')
     
     -- Get password from user
     local password = get_password()
@@ -573,28 +561,22 @@ function M.toggle_encryption()
     local new_content
     local operation
     
-    if is_encrypted(content) then
-        new_content = decrypt_content(content, password)
+    if is_text_encrypted(content) then
+        new_content = decrypt_text_only(content, password)
         operation = "decrypted"
     else
-        new_content = encrypt_content(content, password)
+        new_content = encrypt_text_only(content, password)
         operation = "encrypted"
     end
     
-    -- Write the result back to file
-    file = io.open(filename, "wb")
-    if not file then
-        vim.notify("Cannot write to file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
+    -- Split content back into lines and set buffer content
+    local new_lines = vim.split(new_content, '\n')
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
-    file:write(new_content)
-    file:close()
+    -- Mark buffer as modified
+    vim.api.nvim_buf_set_option(buf, 'modified', true)
     
-    -- Reload the buffer
-    vim.cmd("edit!")
-    
-    vim.notify("File " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
+    vim.notify("Buffer " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
 
 -- Encrypt current buffer content
@@ -627,26 +609,15 @@ function M.encrypt()
         return
     end
     
-    -- Handle full file encryption (existing logic)
+    -- Handle full buffer encryption (modified to work at buffer level)
     local buf = vim.api.nvim_get_current_buf()
-    local filename = vim.api.nvim_buf_get_name(buf)
     
-    if filename == "" then
-        vim.notify("Buffer has no filename", vim.log.levels.ERROR)
-        return
-    end
+    -- Get all lines from the current buffer
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local content = table.concat(lines, '\n')
     
-    local file = io.open(filename, "rb")
-    if not file then
-        vim.notify("Cannot read file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
-    
-    local content = file:read("*all")
-    file:close()
-    
-    if is_encrypted(content) then
-        vim.notify("File is already encrypted", vim.log.levels.WARN)
+    if is_text_encrypted(content) then
+        vim.notify("Buffer content is already encrypted", vim.log.levels.WARN)
         return
     end
     
@@ -656,19 +627,16 @@ function M.encrypt()
         return
     end
     
-    local encrypted_content = encrypt_content(content, password)
+    local encrypted_content = encrypt_text_only(content, password)
     
-    file = io.open(filename, "wb")
-    if not file then
-        vim.notify("Cannot write to file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
+    -- Split content back into lines and set buffer content
+    local new_lines = vim.split(encrypted_content, '\n')
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
-    file:write(encrypted_content)
-    file:close()
+    -- Mark buffer as modified
+    vim.api.nvim_buf_set_option(buf, 'modified', true)
     
-    vim.cmd("edit!")
-    vim.notify("File encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
+    vim.notify("Buffer encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
 
 -- Decrypt current buffer content
@@ -701,26 +669,15 @@ function M.decrypt()
         return
     end
     
-    -- Handle full file decryption (existing logic)
+    -- Handle full buffer decryption (modified to work at buffer level)
     local buf = vim.api.nvim_get_current_buf()
-    local filename = vim.api.nvim_buf_get_name(buf)
     
-    if filename == "" then
-        vim.notify("Buffer has no filename", vim.log.levels.ERROR)
-        return
-    end
+    -- Get all lines from the current buffer
+    local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+    local content = table.concat(lines, '\n')
     
-    local file = io.open(filename, "rb")
-    if not file then
-        vim.notify("Cannot read file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
-    
-    local content = file:read("*all")
-    file:close()
-    
-    if not is_encrypted(content) then
-        vim.notify("File is not encrypted", vim.log.levels.WARN)
+    if not is_text_encrypted(content) then
+        vim.notify("Buffer content is not encrypted", vim.log.levels.WARN)
         return
     end
     
@@ -730,19 +687,16 @@ function M.decrypt()
         return
     end
     
-    local decrypted_content = decrypt_content(content, password)
+    local decrypted_content = decrypt_text_only(content, password)
     
-    file = io.open(filename, "wb")
-    if not file then
-        vim.notify("Cannot write to file: " .. filename, vim.log.levels.ERROR)
-        return
-    end
+    -- Split content back into lines and set buffer content
+    local new_lines = vim.split(decrypted_content, '\n')
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
     
-    file:write(decrypted_content)
-    file:close()
+    -- Mark buffer as modified
+    vim.api.nvim_buf_set_option(buf, 'modified', true)
     
-    vim.cmd("edit!")
-    vim.notify("File decrypted successfully", vim.log.levels.INFO)
+    vim.notify("Buffer decrypted successfully", vim.log.levels.INFO)
 end
 
 -- Change cipher method
