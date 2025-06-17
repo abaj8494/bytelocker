@@ -35,18 +35,23 @@ local function prepare_password(password)
     return prepared
 end
 
--- Bitwise left rotate function (fixed for perfect reversibility)
-local function rol(value, bits)
-    value = value % 256
+-- Use Neovim's built-in bit operations
+local bit = require("bit")
+local band, bor, bxor = bit.band, bit.bor, bit.bxor
+local lshift, rshift = bit.lshift, bit.rshift
+local rol, ror = bit.rol, bit.ror
+
+-- Helper functions for 8-bit rotations using Neovim's 32-bit operations
+local function rol8(value, bits)
+    value = band(value, 0xFF)  -- Ensure 8-bit value
     bits = bits % 8  -- Ensure bits is within valid range
-    return ((value << bits) | (value >> (8 - bits))) % 256
+    return band(bor(lshift(value, bits), rshift(value, 8 - bits)), 0xFF)
 end
 
--- Bitwise right rotate function (fixed for perfect reversibility)
-local function ror(value, bits)
-    value = value % 256
+local function ror8(value, bits)
+    value = band(value, 0xFF)  -- Ensure 8-bit value
     bits = bits % 8  -- Ensure bits is within valid range
-    return ((value >> bits) | (value << (8 - bits))) % 256
+    return band(bor(rshift(value, bits), lshift(value, 8 - bits)), 0xFF)
 end
 
 -- SHIFT CIPHER IMPLEMENTATION
@@ -57,7 +62,7 @@ local function shift_encrypt_block(plaintext_block, password)
         local shift_amount = password[i] % 8  -- Limit shift to prevent overflow
         
         -- Apply rotation encryption
-        byte_val = rol(byte_val, shift_amount)
+        byte_val = rol8(byte_val, shift_amount)
         
         table.insert(encrypted, string.char(byte_val))
     end
@@ -71,7 +76,7 @@ local function shift_decrypt_block(ciphertext_block, password)
         local shift_amount = password[i] % 8  -- Limit shift to prevent overflow
         
         -- Apply rotation decryption (reverse of encryption)
-        byte_val = ror(byte_val, shift_amount)
+        byte_val = ror8(byte_val, shift_amount)
         
         table.insert(decrypted, string.char(byte_val))
     end
@@ -86,7 +91,7 @@ local function xor_encrypt_block(plaintext_block, password)
         local key_byte = password[i]
         
         -- XOR encryption
-        local encrypted_byte = byte_val ~ key_byte
+        local encrypted_byte = bxor(byte_val, key_byte)
         table.insert(encrypted, string.char(encrypted_byte))
     end
     return table.concat(encrypted)
@@ -160,10 +165,10 @@ local function encrypt_content(content, password)
     -- Store the original content length in the first 4 bytes after the null marker
     local original_length = #content
     local length_bytes = string.char(
-        (original_length >> 24) & 0xFF,
-        (original_length >> 16) & 0xFF,
-        (original_length >> 8) & 0xFF,
-        original_length & 0xFF
+        band(rshift(original_length, 24), 0xFF),
+        band(rshift(original_length, 16), 0xFF),
+        band(rshift(original_length, 8), 0xFF),
+        band(original_length, 0xFF)
     )
     
     local result = {string.char(0), length_bytes} -- Start with null byte + length
@@ -195,9 +200,9 @@ local function decrypt_content(content, password)
     
     local length_bytes = content:sub(2, 5)
     local original_length = 
-        (string.byte(length_bytes, 1) << 24) +
-        (string.byte(length_bytes, 2) << 16) +
-        (string.byte(length_bytes, 3) << 8) +
+        lshift(string.byte(length_bytes, 1), 24) +
+        lshift(string.byte(length_bytes, 2), 16) +
+        lshift(string.byte(length_bytes, 3), 8) +
         string.byte(length_bytes, 4)
     
     -- Skip null byte and length bytes
