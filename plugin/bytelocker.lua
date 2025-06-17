@@ -6,8 +6,8 @@ if vim.g.loaded_bytelocker then
 end
 vim.g.loaded_bytelocker = 1
 
--- Auto-setup with default options if not already configured
+-- Auto-setup with minimal defaults if not already configured
 if not vim.g.bytelocker_setup_done then
-    require('bytelocker').setup()
+    require('bytelocker').setup({})
     vim.g.bytelocker_setup_done = true
 end 

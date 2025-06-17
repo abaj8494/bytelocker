@@ -29,6 +29,7 @@ use 'abaj8494/bytelocker'
         require('bytelocker').setup({
             setup_keymaps = true,  -- Optional: set up default keymaps
             cipher = "shift"       -- Optional: pre-select cipher ("shift", "xor", "caesar")
+                                  -- If not specified, you'll be prompted when first using the plugin
         })
     end
 }
@@ -53,10 +54,8 @@ Plug 'abaj8494/bytelocker'
 
 If you enable `setup_keymaps = true` in the setup configuration:
 
-- `<leader>Et` - Toggle encryption/decryption
-- `<leader>Ee` - Encrypt file
-- `<leader>Ed` - Decrypt file
-- `<leader>Ec` - Change cipher method
+- `E` - Toggle encryption/decryption
+- `<leader>E` - Change cipher method
 
 ### Configuration
 

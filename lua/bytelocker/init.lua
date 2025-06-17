@@ -231,18 +231,17 @@ end
 
 -- User cipher selection
 local function select_cipher()
-    local choices = {}
+    local choices = {"Select encryption cipher:"}
     local cipher_keys = {}
     
+    local index = 1
     for key, cipher in pairs(CIPHERS) do
-        table.insert(choices, string.format("%s - %s", cipher.name, cipher.description))
+        table.insert(choices, string.format("%d. %s - %s", index, cipher.name, cipher.description))
         table.insert(cipher_keys, key)
+        index = index + 1
     end
     
-    local choice = vim.fn.inputlist(vim.tbl_flatten({
-        "Select encryption cipher:",
-        choices
-    }))
+    local choice = vim.fn.inputlist(choices)
     
     if choice > 0 and choice <= #cipher_keys then
         return cipher_keys[choice]
@@ -253,6 +252,9 @@ end
 
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
 function M.toggle_encryption()
+    -- Ensure cipher is configured before proceeding
+    ensure_cipher_configured()
+    
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -307,6 +309,9 @@ end
 
 -- Encrypt current buffer content
 function M.encrypt()
+    -- Ensure cipher is configured before proceeding
+    ensure_cipher_configured()
+    
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -352,6 +357,9 @@ end
 
 -- Decrypt current buffer content
 function M.decrypt()
+    -- Ensure cipher is configured before proceeding
+    ensure_cipher_configured()
+    
     local buf = vim.api.nvim_get_current_buf()
     local filename = vim.api.nvim_buf_get_name(buf)
     
@@ -402,6 +410,16 @@ function M.change_cipher()
     vim.notify("Cipher changed to: " .. CIPHERS[new_cipher].name, vim.log.levels.INFO)
 end
 
+-- Helper function to ensure cipher is configured
+local function ensure_cipher_configured()
+    if not config.cipher or config.cipher == "shift" and not config._cipher_selected then
+        vim.notify("Please select your encryption cipher:", vim.log.levels.INFO)
+        config.cipher = select_cipher()
+        config._cipher_selected = true
+        vim.notify("Cipher set to: " .. CIPHERS[config.cipher].name, vim.log.levels.INFO)
+    end
+end
+
 -- Setup function for plugin configuration
 function M.setup(opts)
     opts = opts or {}
@@ -409,10 +427,9 @@ function M.setup(opts)
     -- Merge user config with defaults
     config = vim.tbl_deep_extend("force", config, opts)
     
-    -- If cipher is not set, prompt user to select one
-    if not opts.cipher then
-        vim.notify("Welcome to Bytelocker! Please select your default cipher.", vim.log.levels.INFO)
-        config.cipher = select_cipher()
+    -- Mark cipher as selected if user provided one
+    if opts.cipher then
+        config._cipher_selected = true
     end
     
     -- Create user commands
@@ -434,10 +451,8 @@ function M.setup(opts)
     
     -- Set up keymaps with 'E' (updated to use capital E)
     if config.setup_keymaps then
-        vim.keymap.set('n', '<leader>Et', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
-        vim.keymap.set('n', '<leader>Ee', M.encrypt, { desc = 'Bytelocker: Encrypt file' })
-        vim.keymap.set('n', '<leader>Ed', M.decrypt, { desc = 'Bytelocker: Decrypt file' })
-        vim.keymap.set('n', '<leader>Ec', M.change_cipher, { desc = 'Bytelocker: Change cipher' })
+        vim.keymap.set('n', 'E', M.toggle_encryption, { desc = 'Bytelocker: Toggle encryption' })
+        vim.keymap.set('n', '<leader>E', M.change_cipher, { desc = 'Bytelocker: Change cipher' })
     end
 end
 
