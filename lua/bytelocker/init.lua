@@ -360,6 +360,13 @@ local function get_current_visual_selection()
             end_line, end_col = start_pos[2], start_pos[3]
         end
         
+        -- Handle Visual Line mode (V) - select entire lines
+        if mode == 'V' then
+            start_col = 1
+            local line_content = vim.api.nvim_buf_get_lines(0, end_line - 1, end_line, false)[1]
+            end_col = #line_content
+        end
+        
         -- Get the selected text
         local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
         if #lines == 0 then return nil end
@@ -367,20 +374,30 @@ local function get_current_visual_selection()
         local text
         if start_line == end_line then
             -- Single line selection
-            text = lines[1]:sub(start_col, end_col)
+            if mode == 'V' then
+                -- Visual line mode - take the whole line
+                text = lines[1]
+            else
+                text = lines[1]:sub(start_col, end_col)
+            end
         else
             -- Multi-line selection
-            local first_line = lines[1]:sub(start_col)
-            local last_line = lines[#lines]:sub(1, end_col)
-            
-            local selected_lines = {first_line}
-            for i = 2, #lines - 1 do
-                table.insert(selected_lines, lines[i])
+            if mode == 'V' then
+                -- Visual line mode - take all complete lines
+                text = table.concat(lines, '\n')
+            else
+                local first_line = lines[1]:sub(start_col)
+                local last_line = lines[#lines]:sub(1, end_col)
+                
+                local selected_lines = {first_line}
+                for i = 2, #lines - 1 do
+                    table.insert(selected_lines, lines[i])
+                end
+                if #lines > 1 then
+                    table.insert(selected_lines, last_line)
+                end
+                text = table.concat(selected_lines, '\n')
             end
-            if #lines > 1 then
-                table.insert(selected_lines, last_line)
-            end
-            text = table.concat(selected_lines, '\n')
         end
         
         return {
@@ -388,7 +405,8 @@ local function get_current_visual_selection()
             start_line = start_line,
             start_col = start_col,
             end_line = end_line,
-            end_col = end_col
+            end_col = end_col,
+            mode = mode
         }
     end
     
@@ -480,13 +498,34 @@ end
 local function replace_visual_selection(selection, new_text)
     local new_lines = vim.split(new_text, '\n')
     
+    -- Handle Visual Line mode (entire lines)
+    if selection.mode == 'V' then
+        -- Visual line mode - replace entire lines
+        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.end_line, false, new_lines)
+        return
+    end
+    
     if selection.start_line == selection.end_line then
         -- Single line replacement
         local current_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
         local before = current_line:sub(1, selection.start_col - 1)
         local after = current_line:sub(selection.end_col + 1)
-        local new_line = before .. new_text .. after
-        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.start_line, false, {new_line})
+        
+        -- Build replacement lines
+        local replacement_lines = {}
+        if #new_lines == 1 then
+            -- Single line replacement
+            table.insert(replacement_lines, before .. new_lines[1] .. after)
+        else
+            -- Multi-line replacement from single line
+            table.insert(replacement_lines, before .. new_lines[1])
+            for i = 2, #new_lines - 1 do
+                table.insert(replacement_lines, new_lines[i])
+            end
+            table.insert(replacement_lines, new_lines[#new_lines] .. after)
+        end
+        
+        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.start_line, false, replacement_lines)
     else
         -- Multi-line replacement
         local first_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
@@ -499,12 +538,14 @@ local function replace_visual_selection(selection, new_text)
         local replacement_lines = {}
         if #new_lines == 1 then
             -- New text is single line, merge with before/after
-            table.insert(replacement_lines, before .. new_text .. after)
+            table.insert(replacement_lines, before .. new_lines[1] .. after)
         else
             -- New text is multi-line
-            new_lines[1] = before .. new_lines[1]
-            new_lines[#new_lines] = new_lines[#new_lines] .. after
-            replacement_lines = new_lines
+            table.insert(replacement_lines, before .. new_lines[1])
+            for i = 2, #new_lines - 1 do
+                table.insert(replacement_lines, new_lines[i])
+            end
+            table.insert(replacement_lines, new_lines[#new_lines] .. after)
         end
         
         vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.end_line, false, replacement_lines)
