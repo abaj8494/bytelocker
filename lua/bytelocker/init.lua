@@ -2,6 +2,7 @@ local M = {}
 
 -- Constants
 local CIPHER_BLOCK_SIZE = 16
+local MAGIC_HEADER = "BYTELOCKR"  -- 9-byte magic header for encrypted text
 
 -- Available cipher methods
 local CIPHERS = {
@@ -582,7 +583,7 @@ local function replace_visual_selection(selection, new_text)
     end
 end
 
--- Encrypt/decrypt text only (without file format headers) - SECURE VERSION
+-- Encrypt/decrypt text only (without file format headers) - SECURE VERSION WITH MAGIC HEADER
 local function encrypt_text_only(content, password)
     -- Make sure we don't accidentally include password in output
     if not content or content == "" then
@@ -590,7 +591,17 @@ local function encrypt_text_only(content, password)
     end
     
     local prepared_password = prepare_password(password)
-    local result = {}
+    
+    -- Add magic header and original length for reliable detection
+    local original_length = #content
+    local length_bytes = string.char(
+        band(rshift(original_length, 24), 0xFF),
+        band(rshift(original_length, 16), 0xFF),
+        band(rshift(original_length, 8), 0xFF),
+        band(original_length, 0xFF)
+    )
+    
+    local result = {MAGIC_HEADER, length_bytes} -- Start with magic header + length
     
     -- Process content in 16-byte blocks
     for i = 1, #content, CIPHER_BLOCK_SIZE do
@@ -620,7 +631,29 @@ local function decrypt_text_only(content, password)
         return ""
     end
     
+    -- Check for magic header
+    if #content < #MAGIC_HEADER + 4 then
+        error("Invalid encrypted text format: too short")
+    end
+    
+    local header = content:sub(1, #MAGIC_HEADER)
+    if header ~= MAGIC_HEADER then
+        error("Invalid encrypted text format: missing magic header")
+    end
+    
     local prepared_password = prepare_password(password)
+    
+    -- Read the original length after magic header
+    local length_bytes = content:sub(#MAGIC_HEADER + 1, #MAGIC_HEADER + 4)
+    local original_length = 
+        lshift(string.byte(length_bytes, 1), 24) +
+        lshift(string.byte(length_bytes, 2), 16) +
+        lshift(string.byte(length_bytes, 3), 8) +
+        string.byte(length_bytes, 4)
+    
+    -- Skip magic header and length bytes
+    content = content:sub(#MAGIC_HEADER + 5)
+    
     local result = {}
     
     -- Process content in 16-byte blocks
@@ -644,28 +677,17 @@ local function decrypt_text_only(content, password)
     
     local decrypted = table.concat(result)
     
-    -- Remove trailing null characters that were added as padding
-    return decrypted:gsub("%z+$", "")
+    -- Return exactly the original length to prevent data loss
+    return decrypted:sub(1, original_length)
 end
 
--- Check if text appears to be encrypted (contains many null or non-printable characters)
+-- Check if text appears to be encrypted (reliable magic header detection)
 local function is_text_encrypted(text)
-    if #text == 0 then return false end
+    if #text < #MAGIC_HEADER then return false end
     
-    local null_count = 0
-    local non_printable_count = 0
-    
-    for i = 1, math.min(#text, 100) do -- Check first 100 characters
-        local byte = string.byte(text, i)
-        if byte == 0 then
-            null_count = null_count + 1
-        elseif byte < 32 or byte > 126 then
-            non_printable_count = non_printable_count + 1
-        end
-    end
-    
-    -- Consider encrypted if more than 20% are null or non-printable
-    return (null_count + non_printable_count) / math.min(#text, 100) > 0.2
+    -- Check for magic header
+    local header = text:sub(1, #MAGIC_HEADER)
+    return header == MAGIC_HEADER
 end
 
 -- Main toggle function - encrypts if plain text, decrypts if encrypted
@@ -693,7 +715,13 @@ function M.toggle_encryption()
         local operation
         
         if is_text_encrypted(selection.text) then
-            new_text = decrypt_text_only(selection.text, password)
+            -- Attempt decryption with error handling
+            local success, result = pcall(decrypt_text_only, selection.text, password)
+            if not success then
+                vim.notify("Decryption failed: " .. result, vim.log.levels.ERROR)
+                return
+            end
+            new_text = result
             operation = "decrypted"
         else
             new_text = encrypt_text_only(selection.text, password)
@@ -726,7 +754,13 @@ function M.toggle_encryption()
     local operation
     
     if is_text_encrypted(content) then
-        new_content = decrypt_text_only(content, password)
+        -- Attempt decryption with error handling
+        local success, result = pcall(decrypt_text_only, content, password)
+        if not success then
+            vim.notify("Decryption failed: " .. result, vim.log.levels.ERROR)
+            return
+        end
+        new_content = result
         operation = "decrypted"
     else
         new_content = encrypt_text_only(content, password)
@@ -824,7 +858,11 @@ function M.decrypt()
             return
         end
         
-        local decrypted_text = decrypt_text_only(selection.text, password)
+        local success, decrypted_text = pcall(decrypt_text_only, selection.text, password)
+        if not success then
+            vim.notify("Decryption failed: " .. decrypted_text, vim.log.levels.ERROR)
+            return
+        end
         replace_visual_selection(selection, decrypted_text)
         vim.notify("Selected text decrypted successfully", vim.log.levels.INFO)
         
@@ -851,7 +889,11 @@ function M.decrypt()
         return
     end
     
-    local decrypted_content = decrypt_text_only(content, password)
+    local success, decrypted_content = pcall(decrypt_text_only, content, password)
+    if not success then
+        vim.notify("Decryption failed: " .. decrypted_content, vim.log.levels.ERROR)
+        return
+    end
     
     -- Split content back into lines and set buffer content (preserve trailing newlines)
     local new_lines = vim.split(decrypted_content, '\n', { plain = true })
