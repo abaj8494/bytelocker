@@ -343,30 +343,41 @@ end
 
 -- Helper function to check if there's a visual selection
 local function get_visual_selection()
-    -- Check if we're in visual mode by looking at the mode
-    local mode = vim.api.nvim_get_mode().mode
-    if not (mode == 'v' or mode == 'V' or mode == '') then
-        -- Not in visual mode, but check if there are visual marks
-        local start_pos = vim.fn.getpos("'<")
-        local end_pos = vim.fn.getpos("'>")
-        
-        -- If no marks or marks are at position 0, no selection
-        if start_pos[2] == 0 or end_pos[2] == 0 then
-            return nil
-        end
-    end
-    
+    -- Check if we have valid visual marks
     local start_pos = vim.fn.getpos("'<")
     local end_pos = vim.fn.getpos("'>")
     
+    -- Debug: Show the marks
+    vim.notify(string.format("Visual marks: start=(%d,%d), end=(%d,%d)", 
+        start_pos[2], start_pos[3], end_pos[2], end_pos[3]), vim.log.levels.INFO)
+    
+    -- If no marks or marks are at position 0, no selection
     if start_pos[2] == 0 or end_pos[2] == 0 then
+        vim.notify("No valid visual marks found", vim.log.levels.INFO)
         return nil
+    end
+    
+    -- Get current mode to see if we're in visual mode
+    local mode = vim.api.nvim_get_mode().mode
+    local in_visual_mode = (mode == 'v' or mode == 'V' or mode == '')
+    
+    -- If not in visual mode, only proceed if marks seem valid (different positions)
+    if not in_visual_mode then
+        if start_pos[2] == end_pos[2] and start_pos[3] == end_pos[3] then
+            return nil
+        end
     end
     
     local start_line = start_pos[2]
     local start_col = start_pos[3]
     local end_line = end_pos[2]
     local end_col = end_pos[3]
+    
+    -- Ensure start comes before end
+    if start_line > end_line or (start_line == end_line and start_col > end_col) then
+        start_line, end_line = end_line, start_line
+        start_col, end_col = end_col, start_col
+    end
     
     local lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
     
@@ -375,7 +386,7 @@ local function get_visual_selection()
     end
     
     -- Handle single line selection
-    if #lines == 1 then
+    if start_line == end_line then
         local text = lines[1]:sub(start_col, end_col)
         return {
             text = text,
@@ -387,11 +398,20 @@ local function get_visual_selection()
     end
     
     -- Handle multi-line selection
-    lines[1] = lines[1]:sub(start_col)
-    lines[#lines] = lines[#lines]:sub(1, end_col)
+    local first_line = lines[1]:sub(start_col)
+    local last_line = lines[#lines]:sub(1, end_col)
+    
+    -- Build the selected text
+    local selected_lines = {first_line}
+    for i = 2, #lines - 1 do
+        table.insert(selected_lines, lines[i])
+    end
+    if #lines > 1 then
+        table.insert(selected_lines, last_line)
+    end
     
     return {
-        text = table.concat(lines, '\n'),
+        text = table.concat(selected_lines, '\n'),
         start_line = start_line,
         start_col = start_col,
         end_line = end_line,
@@ -401,9 +421,9 @@ end
 
 -- Helper function to replace visual selection with new text
 local function replace_visual_selection(selection, new_text)
-    local lines = vim.split(new_text, '\n')
+    local new_lines = vim.split(new_text, '\n')
     
-    if #lines == 1 then
+    if selection.start_line == selection.end_line then
         -- Single line replacement
         local current_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
         local before = current_line:sub(1, selection.start_col - 1)
@@ -418,10 +438,19 @@ local function replace_visual_selection(selection, new_text)
         local before = first_line:sub(1, selection.start_col - 1)
         local after = last_line:sub(selection.end_col + 1)
         
-        lines[1] = before .. lines[1]
-        lines[#lines] = lines[#lines] .. after
+        -- Prepare the replacement lines
+        local replacement_lines = {}
+        if #new_lines == 1 then
+            -- New text is single line, merge with before/after
+            table.insert(replacement_lines, before .. new_text .. after)
+        else
+            -- New text is multi-line
+            new_lines[1] = before .. new_lines[1]
+            new_lines[#new_lines] = new_lines[#new_lines] .. after
+            replacement_lines = new_lines
+        end
         
-        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.end_line, false, lines)
+        vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.end_line, false, replacement_lines)
     end
 end
 
@@ -518,6 +547,11 @@ function M.toggle_encryption()
     local selection = get_visual_selection()
     
     if selection then
+        -- Debug info
+        vim.notify(string.format("Processing selection: lines %d-%d, cols %d-%d", 
+            selection.start_line, selection.end_line, selection.start_col, selection.end_col), vim.log.levels.INFO)
+        vim.notify("Selected text length: " .. #selection.text, vim.log.levels.INFO)
+        
         -- Handle selected text encryption/decryption
         local password = get_password()
         if not password then
