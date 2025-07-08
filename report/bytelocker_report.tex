@@ -1,0 +1,255 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=0.5in]{geometry}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{fancyhdr}
+\usepackage{url}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{multicol}
+\usepackage{titlesec}
+
+% Reduce spacing
+\setlength{\parskip}{3pt}
+\setlength{\parsep}{0pt}
+\setlength{\headsep}{10pt}
+\setlength{\topskip}{0pt}
+\setlength{\topmargin}{0pt}
+\setlength{\topsep}{0pt}
+\setlength{\partopsep}{0pt}
+
+% Compact section titles
+\titlespacing*{\section}{0pt}{8pt}{4pt}
+\titlespacing*{\subsection}{0pt}{6pt}{3pt}
+
+% Colors for syntax highlighting
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+% Code style
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\tiny,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=3pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\pagestyle{fancy}
+\fancyhf{}
+\rhead{Bytelocker: Neovim File Encryption Plugin}
+\lhead{Technical Analysis Report}
+\cfoot{\thepage}
+
+\begin{document}
+
+\title{\textbf{Bytelocker: A Comprehensive File Encryption Plugin for Neovim}}
+\author{Technical Analysis Report}
+\date{\today}
+\maketitle
+
+\vspace{-15pt}
+
+\begin{multicols}{2}
+
+\section{Overview}
+Bytelocker is a sophisticated Neovim plugin designed for encrypting and decrypting files using multiple cipher algorithms. The plugin provides seamless integration with Neovim's workflow, offering automatic encryption detection, toggle functionality, and robust data integrity preservation.
+
+\section{Architecture}
+
+The plugin follows a modular Lua-based architecture:
+
+\textbf{Core Components:}
+\begin{itemize}
+    \item \texttt{lua/bytelocker/init.lua} -- Main implementation (1148 lines)
+    \item \texttt{plugin/bytelocker.lua} -- Plugin entry point and auto-setup
+    \item Magic header system for encrypted content detection
+    \item Persistent password and cipher storage
+\end{itemize}
+
+\section{Encryption Mechanisms}
+
+\subsection{Cipher Algorithms}
+The plugin implements three distinct cipher methods:
+
+\textbf{1. Shift Cipher (Default):} Uses bitwise rotation operations
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- 8-bit rotation with overflow protection
+byte_val = rol8(byte_val, shift_amount)
+\end{lstlisting}
+
+\textbf{2. XOR Cipher:} XOR-based encryption with null-byte protection
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- Prevents password leakage on null bytes
+safe_byte = (byte_val + 1) % 256
+encrypted_byte = bxor(safe_byte, key_byte)
+\end{lstlisting}
+
+\textbf{3. Caesar Cipher:} Character shifting with XOR preprocessing
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- Combined XOR and shift for enhanced security
+intermediate = bxor(byte_val, key_byte)
+encrypted_byte = (intermediate + shift + 1) % 256
+\end{lstlisting}
+
+\subsection{Block Processing}
+All ciphers operate on 16-byte blocks with automatic padding using null characters. The password is prepared as a 16-byte array using modular repetition.
+
+\section{File Detection \& Safety}
+
+\subsection{Two-Layer Safety Architecture}
+The plugin employs a sophisticated two-layer approach to handle non-ASCII encrypted bytes:
+
+\textbf{Layer 1 - Binary Encryption with Magic Header:}
+\begin{itemize}
+    \item Encrypted data begins with "BYTELOCKR" magic header (9 bytes)
+    \item Followed by original file length (4 bytes, big-endian)
+    \item Then encrypted 16-byte blocks (potentially non-ASCII)
+\end{itemize}
+
+\textbf{Layer 2 - ASCII-Safe File Storage:}
+\begin{itemize}
+    \item Entire binary encrypted data -> Base64 encoded
+    \item Wrapped with ASCII markers: "---BYTELOCKER-ENCRYPTED-FILE---"
+    \item Guarantees file system compatibility and safe text handling
+\end{itemize}
+
+\subsection{Encryption Detection}
+File detection uses the ASCII wrapper markers, not magic header:
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- File detection looks for ASCII markers
+local header = "---BYTELOCKER-ENCRYPTED-FILE---"
+return content:sub(1, #header) == header
+\end{lstlisting}
+
+\subsection{Data Integrity Features}
+Critical improvements over basic encryption:
+\begin{itemize}
+    \item \textbf{Length Preservation:} Original file length stored in 4-byte header
+    \item \textbf{Perfect Reversibility:} All cipher operations are mathematically reversible
+    \item \textbf{Overflow Protection:} Bit operations bounded to prevent corruption
+    \item \textbf{Null Byte Handling:} Special treatment prevents password leakage
+\end{itemize}
+
+\section{User Interface}
+
+\subsection{Commands}
+\begin{itemize}
+    \item \texttt{:BytelockerToggle} -- Auto-detect and toggle encryption
+    \item \texttt{:BytelockerEncrypt} -- Explicit encryption
+    \item \texttt{:BytelockerDecrypt} -- Explicit decryption
+    \item \texttt{:BytelockerChangeCipher} -- Switch cipher method
+    \item \texttt{:BytelockerClearPassword} -- Clear stored credentials
+\end{itemize}
+
+\subsection{Visual Selection Support}
+The plugin supports both full-buffer and visual selection operations, maintaining the same encryption format for consistency.
+
+\section{Password Management}
+
+\subsection{Security Features}
+\begin{itemize}
+    \item Password persistence across sessions
+    \item Basic obfuscation using character shifting
+    \item Memory and disk storage with automatic cleanup
+    \item Secure input using \texttt{inputsecret()} function
+\end{itemize}
+
+\subsection{Password Preparation}
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- Generate deterministic key from password
+for i = 1, CIPHER_BLOCK_SIZE do
+    local char_code = string.byte(password, 
+        ((i - 1) % #password) + 1)
+    table.insert(prepared, char_code % 256)
+end
+\end{lstlisting}
+
+\section{Technical Implementation}
+
+\subsection{File Format Structure}
+The complete encrypted file structure demonstrates the two-layer approach:
+
+\textbf{Final File Format (ASCII-safe):}
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+---BYTELOCKER-ENCRYPTED-FILE---
+[Base64-encoded binary data]
+---END-BYTELOCKER-ENCRYPTED-FILE---
+\end{lstlisting}
+
+\textbf{Inner Binary Format (before Base64):}
+\begin{enumerate}
+    \item Magic header "BYTELOCKR" (9 bytes)
+    \item Original file length (4 bytes, big-endian)
+    \item Encrypted content blocks (16-byte aligned)
+\end{enumerate}
+
+\textbf{ASCII Safety Transformation:}
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- Non-ASCII binary -> Base64 -> ASCII file
+local binary_encrypted = encrypt_text_only(content, password)
+local base64_encrypted = base64_encode(binary_encrypted)
+local file_content = header .. base64_encrypted .. footer
+\end{lstlisting}
+
+\subsection{Error Handling}
+Robust error handling includes:
+\begin{itemize}
+    \item \texttt{pcall()} wrapper for decryption operations
+    \item Validation of file format and header integrity
+    \item Graceful handling of corrupted or invalid files
+    \item User feedback through Neovim's notification system
+\end{itemize}
+
+\section{Advanced Features}
+
+\subsection{Base64 Encoding Layer}
+To solve the non-ASCII problem, the plugin implements a custom Base64 encoder:
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+-- Custom Base64 implementation ensures ASCII safety
+local base64_chars = 
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+-- Processes 3-byte groups -> 4 ASCII characters
+local combined = lshift(b1, 16) + lshift(b2, 8) + b3
+local c1 = band(rshift(combined, 18), 0x3F) + 1
+-- ... continues for c2, c3, c4
+\end{lstlisting}
+
+This elegant solution transforms any binary data (including cipher-generated non-ASCII bytes) into guaranteed ASCII text safe for file systems, editors, and transmission.
+
+\subsection{Cipher Persistence}
+User cipher choice is automatically saved to disk and restored across sessions, providing consistent encryption behavior.
+
+\subsection{Configuration Options}
+\begin{lstlisting}[basicstyle=\ttfamily\tiny]
+require('bytelocker').setup({
+    setup_keymaps = true,  -- Enable 'E' keybind
+    cipher = "shift"       -- Pre-select cipher
+})
+\end{lstlisting}
+
+\section{Conclusion}
+
+Bytelocker demonstrates sophisticated cryptographic implementation within Neovim's ecosystem. Its multi-cipher approach, robust error handling, and data integrity features make it a reliable tool for file encryption workflows. The plugin's modular architecture and comprehensive test coverage ensure maintainability and extensibility for future enhancements.
+
+\end{multicols}
+
+\end{document} 
