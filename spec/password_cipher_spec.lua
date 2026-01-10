@@ -1,14 +1,10 @@
 -- Unit tests for password and cipher management
 -- Tests persistence, obfuscation, and state management
 
-local vim_mock = require("spec.mocks.vim_mock")
-_G.vim = vim_mock.vim
-
-local bl = require("spec.bytelocker_testable")
+local bl = require("spec.helpers.test_utils")
 
 describe("Password Management", function()
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -144,7 +140,6 @@ end)
 
 describe("Cipher Management", function()
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -233,7 +228,7 @@ end)
 
 describe("State Reset", function()
     before_each(function()
-        vim_mock.reset()
+        bl.reset()
     end)
 
     after_each(function()

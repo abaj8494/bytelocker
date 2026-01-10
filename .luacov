@@ -1,0 +1,24 @@
+-- LuaCov configuration for Bytelocker
+return {
+    -- Include bytelocker source files
+    include = {
+        "bytelocker/core",
+        "bytelocker/init",
+        "test_utils",
+    },
+
+    -- Exclude test framework and system libraries
+    exclude = {
+        "_spec%.lua$",
+        "/opt/homebrew/",
+        "luarocks/",
+        "busted/",
+        "luassert/",
+        "mediator",
+        "penlight",
+        "pl/",
+        "cliargs",
+        "bit_compat",
+        "vim_mock",
+    },
+}

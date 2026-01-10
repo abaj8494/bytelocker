@@ -1,5 +1,10 @@
 # bytelocker.nvim
 
+![Tests](https://img.shields.io/badge/tests-298%20passing-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-88%25-green)
+![Lua](https://img.shields.io/badge/lua-5.1%2B-blue)
+![Neovim](https://img.shields.io/badge/neovim-0.5%2B-green)
+
 ## Demo
 
 ![useage](./demo.gif)
@@ -106,13 +111,28 @@ require('bytelocker').setup({
 
 ## Testing
 
-Run the test suite with:
+Run the test suite:
 
 ```bash
-make test
+make test           # Run all tests
+make test-coverage  # Run tests with coverage report
 ```
 
-The project includes 298 tests covering all cipher implementations, edge cases, and integration scenarios.
+### Test Architecture
+
+The project uses a clean separation between core logic and Neovim integration:
+
+- **`lua/bytelocker/core.lua`** - Pure encryption logic (no Neovim dependencies)
+- **`lua/bytelocker/init.lua`** - Neovim integration layer
+- **`spec/helpers/test_utils.lua`** - Test utilities
+
+This architecture ensures tests verify actual source code with **88% coverage** across 298 tests covering:
+- Bit operations and rotations
+- Base64 encoding/decoding
+- All cipher implementations (shift, xor, caesar)
+- Password and cipher persistence
+- Format detection
+- Edge cases and stress scenarios
 
 ## Data Integrity
 

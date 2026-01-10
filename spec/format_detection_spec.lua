@@ -1,14 +1,10 @@
 -- Unit tests for encryption format detection
 -- Tests is_encrypted, is_text_encrypted, is_file_encrypted
 
-local vim_mock = require("spec.mocks.vim_mock")
-_G.vim = vim_mock.vim
-
-local bl = require("spec.bytelocker_testable")
+local bl = require("spec.helpers.test_utils")
 
 describe("Format Detection", function()
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 

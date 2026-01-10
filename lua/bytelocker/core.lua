@@ -1,12 +1,12 @@
--- Testable version of bytelocker that exposes internal functions
--- This module wraps the main bytelocker module and provides access to
--- internal functions for comprehensive unit testing
+-- Bytelocker Core Module
+-- Pure encryption logic with no Neovim dependencies
+-- This module is independently testable
 
 local M = {}
 
--- Constants (exported for testing)
+-- Constants
 M.CIPHER_BLOCK_SIZE = 16
-M.MAGIC_HEADER = "BYTELOCKR"
+M.MAGIC_HEADER = "BYTELOCKR"  -- 9-byte magic header for encrypted text
 
 -- Available cipher methods
 M.CIPHERS = {
@@ -24,38 +24,73 @@ M.CIPHERS = {
     }
 }
 
--- Configuration (mutable for testing)
-M.config = {
-    cipher = "shift",
-    setup_keymaps = false,
-    _cipher_selected = false
-}
+-- Bit operations module (injected or auto-detected)
+local bit_ops = nil
 
--- Storage
-M.stored_password = nil
-M.password_file = vim.fn.stdpath('data') .. '/bytelocker_session.dat'
-M.cipher_file = vim.fn.stdpath('data') .. '/bytelocker_cipher.dat'
+-- Initialize bit operations from various sources
+local function init_bit_ops()
+    if bit_ops then return bit_ops end
 
--- Use bit operations (compatible with LuaJIT and Lua 5.3+)
-local bit = require("spec.mocks.bit_compat")
-local band, bor, bxor = bit.band, bit.bor, bit.bxor
-local lshift, rshift = bit.lshift, bit.rshift
+    -- Try LuaJIT's bit module first (used by Neovim)
+    local ok, bit = pcall(require, "bit")
+    if ok then
+        bit_ops = {
+            band = bit.band,
+            bor = bit.bor,
+            bxor = bit.bxor,
+            lshift = bit.lshift,
+            rshift = bit.rshift,
+        }
+        return bit_ops
+    end
 
--- Export bit operations for direct testing
-M.bit = bit
+    -- Try bit_compat for testing
+    ok, bit = pcall(require, "spec.mocks.bit_compat")
+    if ok then
+        bit_ops = {
+            band = bit.band,
+            bor = bit.bor,
+            bxor = bit.bxor,
+            lshift = bit.lshift,
+            rshift = bit.rshift,
+        }
+        return bit_ops
+    end
 
--- 8-bit left rotate
-function M.rol8(value, bits)
-    value = band(value, 0xFF)
-    bits = bits % 8
-    return band(bor(lshift(value, bits), rshift(value, 8 - bits)), 0xFF)
+    -- Fallback to Lua 5.3+ native operators
+    bit_ops = {
+        band = function(a, b) return a & b end,
+        bor = function(a, b) return a | b end,
+        bxor = function(a, b) return a ~ b end,
+        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
+        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
+    }
+    return bit_ops
 end
 
--- 8-bit right rotate
-function M.ror8(value, bits)
-    value = band(value, 0xFF)
+-- Allow injection of bit operations for testing
+function M.set_bit_ops(ops)
+    bit_ops = ops
+end
+
+-- Get bit operations (initializes if needed)
+local function get_bit_ops()
+    return bit_ops or init_bit_ops()
+end
+
+-- Helper functions for 8-bit rotations
+function M.rol8(value, bits)
+    local ops = get_bit_ops()
+    value = ops.band(value, 0xFF)
     bits = bits % 8
-    return band(bor(rshift(value, bits), lshift(value, 8 - bits)), 0xFF)
+    return ops.band(ops.bor(ops.lshift(value, bits), ops.rshift(value, 8 - bits)), 0xFF)
+end
+
+function M.ror8(value, bits)
+    local ops = get_bit_ops()
+    value = ops.band(value, 0xFF)
+    bits = bits % 8
+    return ops.band(ops.bor(ops.rshift(value, bits), ops.lshift(value, 8 - bits)), 0xFF)
 end
 
 -- Prepare password to 16-byte key
@@ -68,7 +103,7 @@ function M.prepare_password(password)
     return prepared
 end
 
--- SHIFT CIPHER
+-- SHIFT CIPHER IMPLEMENTATION
 function M.shift_encrypt_block(plaintext_block, password)
     local encrypted = {}
     for i = 1, M.CIPHER_BLOCK_SIZE do
@@ -91,10 +126,10 @@ function M.shift_decrypt_block(ciphertext_block, password)
     return table.concat(decrypted)
 end
 
--- XOR CIPHER (FIXED - add+rotate+XOR for password protection)
+-- XOR CIPHER IMPLEMENTATION
 -- Uses +1 to prevent password leakage on null input, rotation to mix bits, XOR with key.
--- Null bytes in output are handled by Base64 encoding at the file level.
 function M.xor_encrypt_block(plaintext_block, password)
+    local ops = get_bit_ops()
     local encrypted = {}
     for i = 1, M.CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
@@ -108,7 +143,7 @@ function M.xor_encrypt_block(plaintext_block, password)
         local rotated = M.rol8(safe_byte, rotation)
 
         -- XOR with key
-        local encrypted_byte = bxor(rotated, key_byte)
+        local encrypted_byte = ops.bxor(rotated, key_byte)
 
         table.insert(encrypted, string.char(encrypted_byte))
     end
@@ -116,6 +151,7 @@ function M.xor_encrypt_block(plaintext_block, password)
 end
 
 function M.xor_decrypt_block(ciphertext_block, password)
+    local ops = get_bit_ops()
     local decrypted = {}
     for i = 1, M.CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(ciphertext_block, i) or 0
@@ -123,7 +159,7 @@ function M.xor_decrypt_block(ciphertext_block, password)
         local rotation = (key_byte % 7) + 1
 
         -- Reverse XOR
-        local rotated = bxor(byte_val, key_byte)
+        local rotated = ops.bxor(byte_val, key_byte)
 
         -- Reverse rotation
         local safe_byte = M.ror8(rotated, rotation)
@@ -136,40 +172,48 @@ function M.xor_decrypt_block(ciphertext_block, password)
     return table.concat(decrypted)
 end
 
--- CAESAR CIPHER
+-- CAESAR CIPHER IMPLEMENTATION
 function M.caesar_encrypt_block(plaintext_block, password)
+    local ops = get_bit_ops()
     local encrypted = {}
     for i = 1, M.CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
         local key_byte = password[i]
-        local intermediate = bxor(byte_val, key_byte)
+
+        -- XOR first, then shift, to prevent password leakage
+        local intermediate = ops.bxor(byte_val, key_byte)
         local shift = key_byte % 128
         local encrypted_byte = (intermediate + shift + 1) % 256
+
         table.insert(encrypted, string.char(encrypted_byte))
     end
     return table.concat(encrypted)
 end
 
 function M.caesar_decrypt_block(ciphertext_block, password)
+    local ops = get_bit_ops()
     local decrypted = {}
     for i = 1, M.CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(ciphertext_block, i) or 0
         local key_byte = password[i]
+
+        -- Reverse the safer Caesar encryption
         local shift = key_byte % 128
         local intermediate = (byte_val - shift - 1 + 256) % 256
-        local decrypted_byte = bxor(intermediate, key_byte)
+        local decrypted_byte = ops.bxor(intermediate, key_byte)
+
         table.insert(decrypted, string.char(decrypted_byte))
     end
     return table.concat(decrypted)
 end
 
--- Block dispatcher
+-- Cipher method dispatcher
 function M.encrypt_block(plaintext_block, password, cipher_type)
     if cipher_type == "xor" then
         return M.xor_encrypt_block(plaintext_block, password)
     elseif cipher_type == "caesar" then
         return M.caesar_encrypt_block(plaintext_block, password)
-    else
+    else -- default to shift
         return M.shift_encrypt_block(plaintext_block, password)
     end
 end
@@ -179,7 +223,7 @@ function M.decrypt_block(ciphertext_block, password, cipher_type)
         return M.xor_decrypt_block(ciphertext_block, password)
     elseif cipher_type == "caesar" then
         return M.caesar_decrypt_block(ciphertext_block, password)
-    else
+    else -- default to shift
         return M.shift_decrypt_block(ciphertext_block, password)
     end
 end
@@ -188,6 +232,7 @@ end
 local base64_chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 function M.base64_encode(data)
+    local ops = get_bit_ops()
     local result = {}
 
     for i = 1, #data, 3 do
@@ -195,12 +240,12 @@ function M.base64_encode(data)
         local b2 = string.byte(data, i + 1) or 0
         local b3 = string.byte(data, i + 2) or 0
 
-        local combined = lshift(b1, 16) + lshift(b2, 8) + b3
+        local combined = ops.lshift(b1, 16) + ops.lshift(b2, 8) + b3
 
-        local c1 = band(rshift(combined, 18), 0x3F) + 1
-        local c2 = band(rshift(combined, 12), 0x3F) + 1
-        local c3 = band(rshift(combined, 6), 0x3F) + 1
-        local c4 = band(combined, 0x3F) + 1
+        local c1 = ops.band(ops.rshift(combined, 18), 0x3F) + 1
+        local c2 = ops.band(ops.rshift(combined, 12), 0x3F) + 1
+        local c3 = ops.band(ops.rshift(combined, 6), 0x3F) + 1
+        local c4 = ops.band(combined, 0x3F) + 1
 
         table.insert(result, base64_chars:sub(c1, c1))
         table.insert(result, base64_chars:sub(c2, c2))
@@ -222,11 +267,14 @@ function M.base64_encode(data)
 end
 
 function M.base64_decode(data)
+    local ops = get_bit_ops()
+    -- Remove whitespace and padding
     data = data:gsub('%s+', ''):gsub('=+$', '')
 
     local result = {}
     local decode_table = {}
 
+    -- Build decode table
     for i = 1, #base64_chars do
         decode_table[base64_chars:sub(i, i)] = i - 1
     end
@@ -237,14 +285,14 @@ function M.base64_decode(data)
         local c3 = decode_table[data:sub(i + 2, i + 2)] or 0
         local c4 = decode_table[data:sub(i + 3, i + 3)] or 0
 
-        local combined = lshift(c1, 18) + lshift(c2, 12) + lshift(c3, 6) + c4
+        local combined = ops.lshift(c1, 18) + ops.lshift(c2, 12) + ops.lshift(c3, 6) + c4
 
-        table.insert(result, string.char(band(rshift(combined, 16), 0xFF)))
+        table.insert(result, string.char(ops.band(ops.rshift(combined, 16), 0xFF)))
         if i + 2 <= #data then
-            table.insert(result, string.char(band(rshift(combined, 8), 0xFF)))
+            table.insert(result, string.char(ops.band(ops.rshift(combined, 8), 0xFF)))
         end
         if i + 3 <= #data then
-            table.insert(result, string.char(band(combined, 0xFF)))
+            table.insert(result, string.char(ops.band(combined, 0xFF)))
         end
     end
 
@@ -269,17 +317,18 @@ function M.is_file_encrypted(content)
     return content:sub(1, #header) == header
 end
 
--- Text encryption (binary with magic header)
-function M.encrypt_text_only(content, password)
+-- Text encryption with magic header
+function M.encrypt_text_only(content, password, cipher_type)
     if not content or content == "" then return "" end
 
+    local ops = get_bit_ops()
     local prepared_password = M.prepare_password(password)
     local original_length = #content
     local length_bytes = string.char(
-        band(rshift(original_length, 24), 0xFF),
-        band(rshift(original_length, 16), 0xFF),
-        band(rshift(original_length, 8), 0xFF),
-        band(original_length, 0xFF)
+        ops.band(ops.rshift(original_length, 24), 0xFF),
+        ops.band(ops.rshift(original_length, 16), 0xFF),
+        ops.band(ops.rshift(original_length, 8), 0xFF),
+        ops.band(original_length, 0xFF)
     )
 
     local result = {M.MAGIC_HEADER, length_bytes}
@@ -289,15 +338,22 @@ function M.encrypt_text_only(content, password)
         while #block < M.CIPHER_BLOCK_SIZE do
             block = block .. string.char(0)
         end
-        local encrypted_block = M.encrypt_block(block, prepared_password, M.config.cipher)
+        local encrypted_block = M.encrypt_block(block, prepared_password, cipher_type)
         table.insert(result, encrypted_block)
+    end
+
+    -- Clear prepared password from memory
+    for i = 1, #prepared_password do
+        prepared_password[i] = 0
     end
 
     return table.concat(result)
 end
 
-function M.decrypt_text_only(content, password)
+function M.decrypt_text_only(content, password, cipher_type)
     if not content or content == "" then return "" end
+
+    local ops = get_bit_ops()
 
     if #content < #M.MAGIC_HEADER + 4 then
         error("Invalid encrypted text format: too short")
@@ -312,9 +368,9 @@ function M.decrypt_text_only(content, password)
 
     local length_bytes = content:sub(#M.MAGIC_HEADER + 1, #M.MAGIC_HEADER + 4)
     local original_length =
-        lshift(string.byte(length_bytes, 1), 24) +
-        lshift(string.byte(length_bytes, 2), 16) +
-        lshift(string.byte(length_bytes, 3), 8) +
+        ops.lshift(string.byte(length_bytes, 1), 24) +
+        ops.lshift(string.byte(length_bytes, 2), 16) +
+        ops.lshift(string.byte(length_bytes, 3), 8) +
         string.byte(length_bytes, 4)
 
     content = content:sub(#M.MAGIC_HEADER + 5)
@@ -326,19 +382,24 @@ function M.decrypt_text_only(content, password)
         while #block < M.CIPHER_BLOCK_SIZE do
             block = block .. string.char(0)
         end
-        local decrypted_block = M.decrypt_block(block, prepared_password, M.config.cipher)
+        local decrypted_block = M.decrypt_block(block, prepared_password, cipher_type)
         table.insert(result, decrypted_block)
+    end
+
+    -- Clear prepared password from memory
+    for i = 1, #prepared_password do
+        prepared_password[i] = 0
     end
 
     local decrypted = table.concat(result)
     return decrypted:sub(1, original_length)
 end
 
--- File-safe encryption (with base64)
-function M.encrypt_for_file(content, password)
+-- File-safe encryption with base64 and markers
+function M.encrypt_for_file(content, password, cipher_type)
     if not content or content == "" then return "" end
 
-    local binary_encrypted = M.encrypt_text_only(content, password)
+    local binary_encrypted = M.encrypt_text_only(content, password, cipher_type)
     local base64_encrypted = M.base64_encode(binary_encrypted)
 
     local file_header = "---BYTELOCKER-ENCRYPTED-FILE---\n"
@@ -347,7 +408,7 @@ function M.encrypt_for_file(content, password)
     return file_header .. base64_encrypted .. file_footer
 end
 
-function M.decrypt_from_file(content, password)
+function M.decrypt_from_file(content, password, cipher_type)
     if not content or content == "" then return "" end
 
     local header = "---BYTELOCKER-ENCRYPTED-FILE---\n"
@@ -368,86 +429,88 @@ function M.decrypt_from_file(content, password)
         error("Invalid encrypted file format: corrupted base64 data")
     end
 
-    return M.decrypt_text_only(binary_encrypted, password)
+    return M.decrypt_text_only(binary_encrypted, password, cipher_type)
 end
 
--- Password management
-function M.save_password(password)
-    if not password then return end
+-- Binary content encryption (original format with null byte marker)
+function M.encrypt_content(content, password, cipher_type)
+    local ops = get_bit_ops()
+    local prepared_password = M.prepare_password(password)
 
+    -- Store original length in first 4 bytes after null marker
+    local original_length = #content
+    local length_bytes = string.char(
+        ops.band(ops.rshift(original_length, 24), 0xFF),
+        ops.band(ops.rshift(original_length, 16), 0xFF),
+        ops.band(ops.rshift(original_length, 8), 0xFF),
+        ops.band(original_length, 0xFF)
+    )
+
+    local result = {string.char(0), length_bytes}
+
+    for i = 1, #content, M.CIPHER_BLOCK_SIZE do
+        local block = content:sub(i, i + M.CIPHER_BLOCK_SIZE - 1)
+        while #block < M.CIPHER_BLOCK_SIZE do
+            block = block .. string.char(0)
+        end
+        local encrypted_block = M.encrypt_block(block, prepared_password, cipher_type)
+        table.insert(result, encrypted_block)
+    end
+
+    return table.concat(result)
+end
+
+function M.decrypt_content(content, password, cipher_type)
+    local ops = get_bit_ops()
+    local prepared_password = M.prepare_password(password)
+
+    if #content < 5 then
+        error("Invalid encrypted file format")
+    end
+
+    local length_bytes = content:sub(2, 5)
+    local original_length =
+        ops.lshift(string.byte(length_bytes, 1), 24) +
+        ops.lshift(string.byte(length_bytes, 2), 16) +
+        ops.lshift(string.byte(length_bytes, 3), 8) +
+        string.byte(length_bytes, 4)
+
+    content = content:sub(6)
+
+    local result = {}
+
+    for i = 1, #content, M.CIPHER_BLOCK_SIZE do
+        local block = content:sub(i, i + M.CIPHER_BLOCK_SIZE - 1)
+        while #block < M.CIPHER_BLOCK_SIZE do
+            block = block .. string.char(0)
+        end
+        local decrypted_block = M.decrypt_block(block, prepared_password, cipher_type)
+        table.insert(result, decrypted_block)
+    end
+
+    local decrypted = table.concat(result)
+    return decrypted:sub(1, original_length)
+end
+
+-- Password obfuscation helpers (for file storage)
+function M.obfuscate_password(password)
+    if not password then return nil end
     local obfuscated = {}
     for i = 1, #password do
         local byte = string.byte(password, i)
         table.insert(obfuscated, string.char((byte + 42) % 256))
     end
-
-    local file = io.open(M.password_file, 'wb')
-    if file then
-        file:write(table.concat(obfuscated))
-        file:close()
-    end
+    return table.concat(obfuscated)
 end
 
-function M.load_password()
-    local file = io.open(M.password_file, 'rb')
-    if not file then return nil end
-
-    local obfuscated = file:read('*all')
-    file:close()
-
-    if #obfuscated == 0 then return nil end
-
+function M.deobfuscate_password(obfuscated)
+    if not obfuscated or #obfuscated == 0 then return nil end
     local password = {}
     for i = 1, #obfuscated do
         local byte = string.byte(obfuscated, i)
         table.insert(password, string.char((byte - 42) % 256))
     end
-
     return table.concat(password)
-end
-
--- Cipher management
-function M.save_cipher(cipher)
-    if not cipher then return end
-
-    local file = io.open(M.cipher_file, 'w')
-    if file then
-        file:write(cipher)
-        file:close()
-    end
-end
-
-function M.load_cipher()
-    local file = io.open(M.cipher_file, 'r')
-    if not file then return nil end
-
-    local cipher = file:read('*all')
-    file:close()
-
-    if cipher and cipher ~= "" and M.CIPHERS[cipher] then
-        return cipher
-    end
-
-    return nil
-end
-
--- Reset test state
-function M.reset()
-    M.config = {
-        cipher = "shift",
-        setup_keymaps = false,
-        _cipher_selected = false
-    }
-    M.stored_password = nil
-    -- Clean up files
-    os.remove(M.password_file)
-    os.remove(M.cipher_file)
-end
-
--- Set cipher for testing
-function M.set_cipher(cipher)
-    M.config.cipher = cipher
-    M.config._cipher_selected = true
 end
 
 return M

@@ -1,17 +1,13 @@
 -- Integration tests for high-level functions
 -- Tests the complete workflow through the public API
 
-local vim_mock = require("spec.mocks.vim_mock")
-_G.vim = vim_mock.vim
-
-local bl = require("spec.bytelocker_testable")
+local bl = require("spec.helpers.test_utils")
 
 -- Since we can't fully test Neovim-specific functions without a real Neovim,
 -- we focus on testing the core logic and state management
 
 describe("Integration Tests", function()
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -310,7 +306,6 @@ end)
 
 describe("API Contract Tests", function()
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 

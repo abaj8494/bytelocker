@@ -1,1 +1,5 @@
 input.mov
+
+# LuaCov output
+luacov.stats.out
+luacov.report.out

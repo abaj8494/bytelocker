@@ -1,7 +1,7 @@
 return {
     _all = {
         coverage = false,
-        lpath = "./?.lua;./?/init.lua;./lua/?.lua;./lua/?/init.lua;./spec/?.lua",
+        lpath = "./?.lua;./?/init.lua;./lua/?.lua;./lua/?/init.lua;./spec/?.lua;./spec/helpers/?.lua",
         ROOT = {"spec"},
     },
     default = {

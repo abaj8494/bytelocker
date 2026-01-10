@@ -1,16 +1,12 @@
 -- Edge case tests for bytelocker
 -- Tests unusual inputs, boundary conditions, and stress scenarios
 
-local vim_mock = require("spec.mocks.vim_mock")
-_G.vim = vim_mock.vim
-
-local bl = require("spec.bytelocker_testable")
+local bl = require("spec.helpers.test_utils")
 
 describe("Edge Cases", function()
     local password = "edge_case_test_pw"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
         bl.set_cipher("shift")
     end)
@@ -345,7 +341,6 @@ describe("Stress Tests", function()
     local password = "stress_test_pw"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
         bl.set_cipher("shift")
     end)

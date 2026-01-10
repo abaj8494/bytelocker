@@ -1,16 +1,12 @@
 -- Integration tests for encryption/decryption roundtrips
 -- Tests end-to-end encryption flow through all layers
 
-local vim_mock = require("spec.mocks.vim_mock")
-_G.vim = vim_mock.vim
-
-local bl = require("spec.bytelocker_testable")
+local bl = require("spec.helpers.test_utils")
 
 describe("Text Encryption Roundtrip (encrypt_text_only / decrypt_text_only)", function()
     local password = "roundtrip_test_password"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -115,7 +111,6 @@ describe("File Encryption Roundtrip (encrypt_for_file / decrypt_from_file)", fun
     local password = "file_roundtrip_password"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -235,7 +230,6 @@ describe("Password Sensitivity", function()
     local wrong_password = "wrong_password"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
         bl.set_cipher("shift")
     end)
@@ -301,7 +295,6 @@ describe("Cipher Compatibility", function()
     local password = "cipher_compat_test"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
     end)
 
@@ -343,7 +336,6 @@ describe("Large Content Handling", function()
     local password = "large_content_test"
 
     before_each(function()
-        vim_mock.reset()
         bl.reset()
         bl.set_cipher("shift")
     end)
