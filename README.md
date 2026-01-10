@@ -1,4 +1,4 @@
-# Bytelocker
+# bytelocker.nvim
 
 ## Demo
 
@@ -6,7 +6,7 @@
 
 ## Intro
 
-A Neovim plugin for encrypting and decrypting files using a simple shift cipher. The plugin automatically detects whether a file is encrypted or not and provides a symmetric toggle function.
+A Neovim plugin for encrypting and decrypting files using multiple cipher methods. The plugin automatically detects whether a file is encrypted or not and provides a symmetric toggle function.
 
 ## Features
 
@@ -16,6 +16,7 @@ A Neovim plugin for encrypting and decrypting files using a simple shift cipher.
 - **Separate encrypt/decrypt**: Individual commands for explicit encryption or decryption
 - **Password protection**: Uses password-based encryption with your chosen cipher
 - **Data integrity**: Improved algorithm prevents data loss during encryption/decryption cycles
+- **Visual selection support**: Encrypt/decrypt selected text within a buffer
 - **User-friendly**: Integrates seamlessly with Neovim workflow
 
 ## Installation
@@ -23,14 +24,14 @@ A Neovim plugin for encrypting and decrypting files using a simple shift cipher.
 ### Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 
 ```lua
-use 'abaj8494/bytelocker'
+use 'abaj8494/bytelocker.nvim'
 ```
 
 ### Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
 {
-    'abaj8494/bytelocker',
+    'abaj8494/bytelocker.nvim',
     config = function()
         require('bytelocker').setup({
             setup_keymaps = true,  -- Optional: set up default keymaps
@@ -44,7 +45,7 @@ use 'abaj8494/bytelocker'
 ### Using [vim-plug](https://github.com/junegunn/vim-plug)
 
 ```vim
-Plug 'abaj8494/bytelocker'
+Plug 'abaj8494/bytelocker.nvim'
 ```
 
 ## Usage
@@ -55,6 +56,8 @@ Plug 'abaj8494/bytelocker'
 - `:BytelockerEncrypt` - Explicitly encrypt the current file
 - `:BytelockerDecrypt` - Explicitly decrypt the current file
 - `:BytelockerChangeCipher` - Change the encryption cipher method
+- `:BytelockerClearPassword` - Clear stored password from memory and disk
+- `:BytelockerClearCipher` - Reset cipher choice to default
 
 ### Default Keymaps (optional)
 
@@ -75,32 +78,45 @@ require('bytelocker').setup({
 
 ### Available Ciphers
 
-- **Shift Cipher** (default): Bitwise rotation cipher - same as original C implementation
-- **XOR Cipher**: XOR-based encryption - simple but effective
-- **Caesar Cipher**: Character shifting cipher - classic substitution method
+- **Shift Cipher** (default): Bitwise rotation cipher - fast and reversible
+- **XOR Cipher**: XOR-based encryption with rotation - secure against password leakage
+- **Caesar Cipher**: Character shifting cipher with XOR preprocessing
 
 ## How it works
 
-1. **Detection**: The plugin checks the first byte of a file to determine if it's encrypted
-   - If the first byte is a printable ASCII character (32-126), the file is considered plain text  
-   - If the first byte is null (0), the file is considered encrypted
+1. **Detection**: The plugin uses magic headers to determine if content is encrypted
+   - File encryption uses `---BYTELOCKER-ENCRYPTED-FILE---` markers with base64 encoding
+   - Text encryption uses a `BYTELOCKR` magic header
 
-2. **Encryption**: 
-   - Adds a null byte marker followed by the original file length (4 bytes)
-   - Processes the content in 16-byte blocks using your chosen cipher
-   - Pads incomplete blocks with null characters
+2. **Encryption**:
+   - Stores original content length for perfect reconstruction
+   - Processes content in 16-byte blocks using your chosen cipher
+   - Encodes output as base64 for safe file storage
 
 3. **Decryption**:
-   - Reads the null byte marker and original file length
-   - Processes encrypted blocks back to plain text using the same cipher
-   - Restores the exact original file length to prevent data loss
+   - Validates magic headers and decodes base64
+   - Processes encrypted blocks back to plain text
+   - Restores exact original content length
 
-## Data Integrity Improvements
+## Security Notes
 
-This version fixes potential data loss issues from the original C implementation:
+- Passwords are stored with basic obfuscation (not secure storage - for convenience only)
+- The XOR cipher includes protection against password leakage on null input
+- These ciphers are for casual privacy, not cryptographic security
 
-- **Length preservation**: Original file length is stored in the encrypted file header
-- **Perfect reversibility**: All cipher implementations ensure encrypt→decrypt cycles preserve data
-- **Trailing data protection**: Files with trailing null bytes or binary data are handled correctly
-- **Overflow protection**: Bit operations are properly bounded to prevent data corruption
+## Testing
 
+Run the test suite with:
+
+```bash
+make test
+```
+
+The project includes 298 tests covering all cipher implementations, edge cases, and integration scenarios.
+
+## Data Integrity
+
+- **Length preservation**: Original content length is stored in the encrypted header
+- **Perfect reversibility**: All cipher implementations ensure encrypt/decrypt cycles preserve data exactly
+- **Binary data support**: Handles all byte values (0-255) correctly
+- **Unicode support**: Full support for UTF-8 and multi-byte characters
