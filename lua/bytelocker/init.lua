@@ -207,23 +207,25 @@ local function shift_decrypt_block(ciphertext_block, password)
     return table.concat(decrypted)
 end
 
--- XOR CIPHER IMPLEMENTATION (FIXED - no password leakage)
+-- XOR CIPHER IMPLEMENTATION (FIXED - add+rotate+XOR for password protection)
+-- Uses +1 to prevent password leakage on null input, rotation to mix bits, XOR with key.
+-- Null bytes in output are handled by Base64 encoding at the file level.
 local function xor_encrypt_block(plaintext_block, password)
     local encrypted = {}
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(plaintext_block, i) or 0
         local key_byte = password[i]
-        
-        -- Safer XOR: avoid direct password exposure on null bytes
-        -- Add a non-zero constant before XOR to prevent password leakage
-        local safe_byte = (byte_val + 1) % 256  -- +1 to avoid null input
-        local encrypted_byte = bxor(safe_byte, key_byte)
-        
-        -- Ensure output is never null (which could leak password on decrypt)
-        if encrypted_byte == 0 then
-            encrypted_byte = 255  -- Use max value instead of 0
-        end
-        
+
+        -- Add 1 to prevent null input from leaking password
+        local safe_byte = (byte_val + 1) % 256
+
+        -- Rotate by key-dependent amount (1-7 bits)
+        local rotation = (key_byte % 7) + 1
+        local rotated = rol8(safe_byte, rotation)
+
+        -- XOR with key
+        local encrypted_byte = bxor(rotated, key_byte)
+
         table.insert(encrypted, string.char(encrypted_byte))
     end
     return table.concat(encrypted)
@@ -234,16 +236,17 @@ local function xor_decrypt_block(ciphertext_block, password)
     for i = 1, CIPHER_BLOCK_SIZE do
         local byte_val = string.byte(ciphertext_block, i) or 0
         local key_byte = password[i]
-        
-        -- Handle the special case where we used 255 instead of 0
-        if byte_val == 255 then
-            byte_val = 0
-        end
-        
-        -- Reverse the safer XOR encryption
-        local safe_byte = bxor(byte_val, key_byte)
-        local decrypted_byte = (safe_byte - 1 + 256) % 256  -- Reverse +1
-        
+        local rotation = (key_byte % 7) + 1
+
+        -- Reverse XOR
+        local rotated = bxor(byte_val, key_byte)
+
+        -- Reverse rotation
+        local safe_byte = ror8(rotated, rotation)
+
+        -- Reverse +1
+        local decrypted_byte = (safe_byte - 1 + 256) % 256
+
         table.insert(decrypted, string.char(decrypted_byte))
     end
     return table.concat(decrypted)

@@ -1,0 +1,15 @@
+return {
+    _all = {
+        coverage = false,
+        lpath = "./?.lua;./?/init.lua;./lua/?.lua;./lua/?/init.lua;./spec/?.lua",
+        ROOT = {"spec"},
+    },
+    default = {
+        verbose = true,
+        output = "utfTerminal",
+    },
+    ci = {
+        output = "TAP",
+        coverage = true,
+    },
+}
