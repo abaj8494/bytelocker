@@ -219,20 +219,13 @@ end
 local function get_visual_selection()
     local current_selection = get_current_visual_selection()
     if current_selection then
-        vim.notify(string.format("Active visual selection: lines %d-%d, cols %d-%d",
-            current_selection.start_line, current_selection.end_line,
-            current_selection.start_col, current_selection.end_col), vim.log.levels.INFO)
         return current_selection
     end
 
     local start_pos = vim.fn.getpos("'<")
     local end_pos = vim.fn.getpos("'>")
 
-    vim.notify(string.format("Visual marks: start=(%d,%d), end=(%d,%d)",
-        start_pos[2], start_pos[3], end_pos[2], end_pos[3]), vim.log.levels.INFO)
-
     if start_pos[2] == 0 or end_pos[2] == 0 then
-        vim.notify("No valid visual marks found", vim.log.levels.INFO)
         return nil
     end
 
@@ -297,7 +290,12 @@ local function replace_visual_selection(selection, new_text)
     end
 
     if selection.start_line == selection.end_line then
-        local current_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
+        local lines = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)
+        if not lines or #lines == 0 then
+            vim.notify("Error: Buffer line no longer exists", vim.log.levels.ERROR)
+            return
+        end
+        local current_line = lines[1]
         local before = current_line:sub(1, selection.start_col - 1)
         local after = current_line:sub(selection.end_col + 1)
 
@@ -314,8 +312,14 @@ local function replace_visual_selection(selection, new_text)
 
         vim.api.nvim_buf_set_lines(0, selection.start_line - 1, selection.start_line, false, replacement_lines)
     else
-        local first_line = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)[1]
-        local last_line = vim.api.nvim_buf_get_lines(0, selection.end_line - 1, selection.end_line, false)[1]
+        local first_lines = vim.api.nvim_buf_get_lines(0, selection.start_line - 1, selection.start_line, false)
+        local last_lines = vim.api.nvim_buf_get_lines(0, selection.end_line - 1, selection.end_line, false)
+        if not first_lines or #first_lines == 0 or not last_lines or #last_lines == 0 then
+            vim.notify("Error: Buffer lines no longer exist", vim.log.levels.ERROR)
+            return
+        end
+        local first_line = first_lines[1]
+        local last_line = last_lines[1]
 
         local before = first_line:sub(1, selection.start_col - 1)
         local after = last_line:sub(selection.end_col + 1)
@@ -342,10 +346,6 @@ function M.toggle_encryption()
     local selection = get_visual_selection()
 
     if selection then
-        vim.notify(string.format("Processing selection: lines %d-%d, cols %d-%d",
-            selection.start_line, selection.end_line, selection.start_col, selection.end_col), vim.log.levels.INFO)
-        vim.notify("Selected text length: " .. #selection.text, vim.log.levels.INFO)
-
         local password = get_password()
         if not password then
             vim.notify("Password cannot be empty", vim.log.levels.ERROR)
@@ -403,7 +403,7 @@ function M.toggle_encryption()
 
     local new_lines = vim.split(new_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
-    vim.api.nvim_buf_set_option(buf, 'modified', true)
+    vim.bo[buf].modified = true
 
     vim.notify("Buffer " .. operation .. " successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
@@ -453,7 +453,7 @@ function M.encrypt()
 
     local new_lines = vim.split(encrypted_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
-    vim.api.nvim_buf_set_option(buf, 'modified', true)
+    vim.bo[buf].modified = true
 
     vim.notify("Buffer encrypted successfully using " .. config.cipher .. " cipher", vim.log.levels.INFO)
 end
@@ -511,7 +511,7 @@ function M.decrypt()
 
     local new_lines = vim.split(decrypted_content, '\n', { plain = true })
     vim.api.nvim_buf_set_lines(buf, 0, -1, false, new_lines)
-    vim.api.nvim_buf_set_option(buf, 'modified', true)
+    vim.bo[buf].modified = true
 
     vim.notify("Buffer decrypted successfully", vim.log.levels.INFO)
 end
