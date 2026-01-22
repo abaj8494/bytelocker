@@ -57,15 +57,8 @@ local function init_bit_ops()
         return bit_ops
     end
 
-    -- Fallback to Lua 5.3+ native operators
-    bit_ops = {
-        band = function(a, b) return a & b end,
-        bor = function(a, b) return a | b end,
-        bxor = function(a, b) return a ~ b end,
-        lshift = function(a, n) return (a << n) & 0xFFFFFFFF end,
-        rshift = function(a, n) return (a & 0xFFFFFFFF) >> n end,
-    }
-    return bit_ops
+    -- No bit library available - this should not happen in Neovim (LuaJIT always has 'bit')
+    error("No bit operations library available. Bytelocker requires LuaJIT's 'bit' library (included with Neovim).")
 end
 
 -- Allow injection of bit operations for testing
